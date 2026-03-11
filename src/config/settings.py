@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model: str = "deepseek-chat"
 
+    # Chat history
+    chat_history_dir: str = "./data/chat_history"
+    chat_max_token_estimate: int = 60000  # ~80% of typical 128k context window
+    chat_compress_keep_ratio: float = 0.3  # keep recent 30%, compress older 70%
+
     # App
     log_level: str = "INFO"
     sqlite_db_path: str = "./data/pineclaw.db"

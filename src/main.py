@@ -9,6 +9,7 @@ from utils import logger
 
 from core.llm.types import LLMConfig
 from core.llm.factory import create_llm_service
+from core.context.chat_store import ChatStore
 from core.context.manager import ContextManager
 from core.context.modules.system_prompt import SystemPromptContext
 from core.tool.manager import ToolManager
@@ -61,15 +62,26 @@ async def startup() -> None:
     register_memory_tools(tool_manager, memory_store)
     logger.info("Memory tools registered, total: %d tools", len(tool_manager.list_tools()))
 
-    # 5. Context Manager
+    # 5. Chat Store (persistent conversation history)
+    chat_store = ChatStore(history_dir=settings.chat_history_dir)
+    logger.info(
+        "ChatStore initialized: dir=%s, session=%s",
+        settings.chat_history_dir,
+        chat_store.session_file,
+    )
+
+    # 6. Context Manager
     memory_ctx = MemoryContext(memory_store)
     context_manager = ContextManager(
+        chat_store=chat_store,
         system_prompt=SystemPromptContext(),
         memory=memory_ctx,
+        max_token_estimate=settings.chat_max_token_estimate,
+        compress_keep_ratio=settings.chat_compress_keep_ratio,
     )
     logger.info("ContextManager created")
 
-    # 6. Agent
+    # 7. Agent
     agent = SimpleAgent(
         llm=llm,
         context_manager=context_manager,
@@ -78,7 +90,7 @@ async def startup() -> None:
     set_agent(agent)
     logger.info("SimpleAgent created")
 
-    # 7. Feishu Channel
+    # 8. Feishu Channel
     async def on_message(text: str, chat_id: str, open_id: str) -> str:
         return await agent.run(text, chat_id, open_id)
 

@@ -1,3 +1,5 @@
+"""记忆工具 - 合并 append/rewrite 为单一 memory 工具"""
+
 from __future__ import annotations
 
 import json
@@ -6,54 +8,38 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from memory.memory_store import MemoryStore
 
-# --- Tool Definitions ---
 
-memory_append_def: dict[str, Any] = {
-    "name": "memory_append",
+memory_def: dict[str, Any] = {
+    "name": "memory",
     "description": (
-        "向长期记忆追加一条新信息。当对话中出现值得长期记住的用户偏好、"
-        "个人信息、工作习惯或重要事实时调用。不要记录临时性信息。"
-        "格式：Markdown 列表项，重要事实带日期前缀 [YYYY-MM-DD]。"
+        "长期记忆操作。"
+        "action=append：向记忆追加一条新信息（用户偏好、重要事实等），需要 section 和 content；"
+        "action=rewrite：整理和重写整个记忆文件（谨慎使用），需要 content 且必须以 '# PineClaw Memory' 开头。"
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["append", "rewrite"],
+                "description": "操作类型：append=追加记忆, rewrite=重写整个记忆",
+            },
             "section": {
                 "type": "string",
-                "description": "记忆分类，如：用户画像、工作习惯、重要事实、偏好指令",
+                "description": "记忆分类，如：用户画像、工作习惯、重要事实、偏好指令（append 时必填）",
             },
             "content": {
                 "type": "string",
-                "description": "要追加的记忆内容，Markdown 格式",
+                "description": "记忆内容，Markdown 格式（必填）",
             },
         },
-        "required": ["section", "content"],
-    },
-}
-
-memory_rewrite_def: dict[str, Any] = {
-    "name": "memory_rewrite",
-    "description": (
-        "整理和重写整个记忆文件。当记忆内容出现重复、过时或需要重新组织时调用。"
-        "传入整理后的完整 Markdown 内容，将替换现有记忆。谨慎使用。"
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "整理后的完整记忆内容，Markdown 格式，必须以 '# PineClaw Memory' 开头",
-            },
-        },
-        "required": ["content"],
+        "required": ["action", "content"],
     },
 }
 
 
-# --- Tool Handlers ---
-
-async def memory_append_handler(memory_store: MemoryStore, args: dict[str, Any]) -> str:
-    section = args["section"]
+async def _handle_append(memory_store: MemoryStore, args: dict[str, Any]) -> str:
+    section = args.get("section") or "未分类"
     content = args["content"]
 
     current_text = memory_store.get_memory_text()
@@ -71,7 +57,7 @@ async def memory_append_handler(memory_store: MemoryStore, args: dict[str, Any])
     )
 
 
-async def memory_rewrite_handler(memory_store: MemoryStore, args: dict[str, Any]) -> str:
+async def _handle_rewrite(memory_store: MemoryStore, args: dict[str, Any]) -> str:
     content = args["content"]
 
     if not content.startswith("# PineClaw Memory"):
@@ -89,17 +75,25 @@ async def memory_rewrite_handler(memory_store: MemoryStore, args: dict[str, Any]
     )
 
 
+_ACTION_MAP = {
+    "append": _handle_append,
+    "rewrite": _handle_rewrite,
+}
+
+
+async def memory_handler(memory_store: MemoryStore, args: dict[str, Any]) -> str:
+    action = args.get("action", "")
+    handler = _ACTION_MAP.get(action)
+    if handler is None:
+        return json.dumps({"error": f"Unknown action: {action}"})
+    return await handler(memory_store, args)
+
+
 def register_memory_tools(tool_manager: Any, memory_store: MemoryStore) -> None:
-    """Register memory_append and memory_rewrite tools."""
+    """Register the unified memory tool."""
     tool_manager.register(
-        name="memory_append",
-        definition=memory_append_def,
-        handler=lambda args: memory_append_handler(memory_store, args),
-        category="memory",
-    )
-    tool_manager.register(
-        name="memory_rewrite",
-        definition=memory_rewrite_def,
-        handler=lambda args: memory_rewrite_handler(memory_store, args),
+        name="memory",
+        definition=memory_def,
+        handler=lambda args: memory_handler(memory_store, args),
         category="memory",
     )

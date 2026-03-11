@@ -1,4 +1,4 @@
-"""飞书任务工具：创建任务、查询任务、更新任务、创建任务列表。"""
+"""飞书任务工具 - 合并创建/查询/更新任务和创建任务列表为单一 feishu_task 工具"""
 
 from __future__ import annotations
 
@@ -12,68 +12,45 @@ from lark_oapi.api.task.v2 import *
 from core.tool.feishu.client import FeishuClient
 from utils import logger
 
-# ── 工具定义 ──
 
-feishu_create_task_def = {
-    "name": "feishu_create_task",
-    "description": "创建一个飞书任务",
+feishu_task_def = {
+    "name": "feishu_task",
+    "description": (
+        "飞书任务操作：创建任务、查询任务列表、更新任务、创建任务列表。"
+        "action=create 需要 summary；"
+        "action=list 可选 completed/page_size/page_token；"
+        "action=update 需要 task_id；"
+        "action=create_tasklist 需要 name。"
+    ),
     "parameters": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "description": "任务标题"},
-            "description": {"type": "string", "description": "任务详细描述"},
-            "due": {"type": "string", "description": "截止时间 ISO 8601 格式"},
-            "members": {"type": "array", "items": {"type": "string"}, "description": "执行者 user_id 列表"},
-            "tasklist_id": {"type": "string", "description": "任务列表 ID（tasklist_guid）"},
+            "action": {
+                "type": "string",
+                "enum": ["create", "list", "update", "create_tasklist"],
+                "description": "操作类型",
+            },
+            "summary": {"type": "string", "description": "任务标题（create/update 时使用）"},
+            "description": {"type": "string", "description": "任务详细描述（create/update 可选）"},
+            "due": {"type": "string", "description": "截止时间 ISO 8601 格式（create/update 可选）"},
+            "members": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "执行者 user_id 列表（create 可选）",
+            },
+            "tasklist_id": {"type": "string", "description": "任务列表 ID（create 可选）"},
+            "task_id": {"type": "string", "description": "任务 ID（update 时必填）"},
+            "completed": {"type": "boolean", "description": "筛选完成/未完成（list 可选），或标记已完成（update 可选）"},
+            "page_size": {"type": "integer", "description": "每页数量（list 可选，默认 50）"},
+            "page_token": {"type": "string", "description": "分页标记（list 可选）"},
+            "name": {"type": "string", "description": "任务列表名称（create_tasklist 时必填）"},
         },
-        "required": ["summary"],
-    },
-}
-
-feishu_list_tasks_def = {
-    "name": "feishu_list_tasks",
-    "description": "查询飞书任务列表",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "completed": {"type": "boolean", "description": "筛选完成(true)/未完成(false)"},
-            "page_size": {"type": "integer", "description": "每页数量，默认 50", "default": 50},
-            "page_token": {"type": "string", "description": "分页标记"},
-        },
-    },
-}
-
-feishu_update_task_def = {
-    "name": "feishu_update_task",
-    "description": "更新飞书任务信息",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "任务 ID"},
-            "summary": {"type": "string", "description": "新标题"},
-            "description": {"type": "string", "description": "新描述"},
-            "due": {"type": "string", "description": "新截止时间 ISO 8601"},
-            "completed": {"type": "boolean", "description": "是否标记已完成"},
-        },
-        "required": ["task_id"],
-    },
-}
-
-feishu_create_tasklist_def = {
-    "name": "feishu_create_tasklist",
-    "description": "创建飞书任务列表（任务看板/分组）",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "任务列表名称"},
-        },
-        "required": ["name"],
+        "required": ["action"],
     },
 }
 
 
 def _parse_iso_to_timestamp(iso_str: str | None) -> int | None:
-    """将 ISO 8601 字符串转为 Unix 时间戳（秒）。"""
     if not iso_str:
         return None
     try:
@@ -83,10 +60,7 @@ def _parse_iso_to_timestamp(iso_str: str | None) -> int | None:
         return None
 
 
-# ── 工具执行器 ──
-
-
-async def feishu_create_task_handler(client: FeishuClient, args: dict) -> str:
+async def _handle_create(client: FeishuClient, args: dict) -> str:
     summary = args.get("summary") or ""
     description = args.get("description")
     due_str = args.get("due")
@@ -115,7 +89,7 @@ async def feishu_create_task_handler(client: FeishuClient, args: dict) -> str:
 
     resp = await client.client.task.v2.task.acreate(request)
     client.increment_api_count()
-    err = client.check_response(resp, "feishu_create_task")
+    err = client.check_response(resp, "feishu_task.create")
     if err:
         return client.to_json(err)
 
@@ -124,7 +98,7 @@ async def feishu_create_task_handler(client: FeishuClient, args: dict) -> str:
     return client.to_json({"task_id": task_id})
 
 
-async def feishu_list_tasks_handler(client: FeishuClient, args: dict) -> str:
+async def _handle_list(client: FeishuClient, args: dict) -> str:
     completed = args.get("completed")
     page_size = args.get("page_size", 50)
     page_token = args.get("page_token") or ""
@@ -138,7 +112,7 @@ async def feishu_list_tasks_handler(client: FeishuClient, args: dict) -> str:
 
     resp = await client.client.task.v2.task.alist(request)
     client.increment_api_count()
-    err = client.check_response(resp, "feishu_list_tasks")
+    err = client.check_response(resp, "feishu_task.list")
     if err:
         return client.to_json(err)
 
@@ -153,15 +127,14 @@ async def feishu_list_tasks_handler(client: FeishuClient, args: dict) -> str:
             "completed": bool(completed_at),
         })
 
-    result = {
+    return client.to_json({
         "tasks": tasks,
         "next_page_token": getattr(body, "next_page_token", None) or "",
         "has_more": getattr(body, "has_more", False) or False,
-    }
-    return client.to_json(result)
+    })
 
 
-async def feishu_update_task_handler(client: FeishuClient, args: dict) -> str:
+async def _handle_update(client: FeishuClient, args: dict) -> str:
     task_id = args.get("task_id") or ""
     if not task_id:
         return client.to_json({"error": "task_id is required"})
@@ -197,21 +170,20 @@ async def feishu_update_task_handler(client: FeishuClient, args: dict) -> str:
 
     resp = await client.client.task.v2.task.apatch(request)
     client.increment_api_count()
-    err = client.check_response(resp, "feishu_update_task")
+    err = client.check_response(resp, "feishu_task.update")
     if err:
         return client.to_json(err)
 
     task_obj = getattr(resp.data, "task", None)
     completed_at = getattr(task_obj, "completed_at", None) or 0
-    result = {
+    return client.to_json({
         "task_id": getattr(task_obj, "guid", None) or task_id,
         "summary": getattr(task_obj, "summary", None) or "",
         "completed": bool(completed_at),
-    }
-    return client.to_json(result)
+    })
 
 
-async def feishu_create_tasklist_handler(client: FeishuClient, args: dict) -> str:
+async def _handle_create_tasklist(client: FeishuClient, args: dict) -> str:
     name = args.get("name") or ""
     if not name:
         return client.to_json({"error": "name is required"})
@@ -221,10 +193,26 @@ async def feishu_create_tasklist_handler(client: FeishuClient, args: dict) -> st
 
     resp = await client.client.task.v2.tasklist.acreate(request)
     client.increment_api_count()
-    err = client.check_response(resp, "feishu_create_tasklist")
+    err = client.check_response(resp, "feishu_task.create_tasklist")
     if err:
         return client.to_json(err)
 
     tasklist_obj = getattr(resp.data, "tasklist", None)
     tasklist_id = getattr(tasklist_obj, "guid", None) or ""
     return client.to_json({"tasklist_id": tasklist_id})
+
+
+_ACTION_MAP = {
+    "create": _handle_create,
+    "list": _handle_list,
+    "update": _handle_update,
+    "create_tasklist": _handle_create_tasklist,
+}
+
+
+async def feishu_task_handler(client: FeishuClient, args: dict) -> str:
+    action = args.get("action", "")
+    handler = _ACTION_MAP.get(action)
+    if handler is None:
+        return json.dumps({"error": f"Unknown action: {action}"})
+    return await handler(client, args)
