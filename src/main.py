@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import asyncio
+from contextlib import asynccontextmanager
 
 import uvicorn
+from fastapi import FastAPI
 
 from config.settings import settings
 from utils import logger
@@ -25,7 +26,7 @@ from memory.memory_store import MemoryStore
 from memory.memory_context import MemoryContext
 
 from channels.feishu.channel import FeishuChannel
-from channels.registry import register_channel
+from channels.registry import get_all_channels, register_channel
 
 from api.app import create_app
 from api.routes.chat import set_agent
@@ -131,12 +132,30 @@ async def startup() -> None:
     logger.info("=== PineClaw ready ===")
 
 
-def main() -> None:
-    app = create_app()
+async def shutdown() -> None:
+    logger.info("=== PineClaw shutting down ===")
 
-    @app.on_event("startup")
-    async def app_startup():
+    channels = get_all_channels()
+    for name, channel in channels.items():
+        try:
+            await channel.disconnect()
+            logger.info("Channel disconnected: %s", name)
+        except Exception:
+            logger.error("Failed to disconnect channel: %s", name, exc_info=True)
+
+    logger.info("=== PineClaw stopped ===")
+
+
+def main() -> None:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
         await startup()
+        try:
+            yield
+        finally:
+            await shutdown()
+
+    app = create_app(lifespan=lifespan)
 
     uvicorn.run(
         app,

@@ -1,14 +1,17 @@
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import health, chat, webhook, card_callback
 
 
-def create_app() -> FastAPI:
+def create_app(*, lifespan: Any = None) -> FastAPI:
     app = FastAPI(
         title="PineClaw",
         description="Lightweight AI Agent with Feishu as collaborative space",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
