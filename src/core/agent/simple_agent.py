@@ -3,13 +3,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.llm.utils.tool_loop import execute_tool_loop
-from utils import logger
+from utils.logger import get_logger
 from utils.token_counter import TokenCounter
 
 if TYPE_CHECKING:
-    from core.llm.services.base import BaseLLMService
+    from core.llm.registry import LLMServiceRegistry
     from core.context.manager import ContextManager
     from core.tool.scheduler import ToolScheduler
+
+logger = get_logger("agent")
 
 CLEAR_COMMANDS = {"清空聊天记录", "清空历史记录", "清空对话", "/clear"}
 
@@ -17,12 +19,12 @@ CLEAR_COMMANDS = {"清空聊天记录", "清空历史记录", "清空对话", "/
 class SimpleAgent:
     def __init__(
         self,
-        llm: BaseLLMService,
+        llm_registry: LLMServiceRegistry,
         context_manager: ContextManager,
         scheduler: ToolScheduler,
         token_counter: TokenCounter | None = None,
     ):
-        self._llm = llm
+        self._registry = llm_registry
         self._ctx = context_manager
         self._scheduler = scheduler
         self._token_counter = token_counter or TokenCounter()
@@ -42,8 +44,9 @@ class SimpleAgent:
         messages = self._ctx.get_context()
         tools = self._scheduler.tool_manager.get_formatted_tools()
 
+        llm = self._registry.get_high()
         response_text, usage, tool_messages = await execute_tool_loop(
-            self._llm, messages, tools, self._scheduler, chat_id=chat_id,
+            llm, messages, tools, self._scheduler, chat_id=chat_id,
         )
 
         self._token_counter.add(usage.prompt_tokens, usage.completion_tokens)
@@ -70,13 +73,13 @@ class SimpleAgent:
         return "聊天记录已清空，开始新的对话。"
 
     async def _compress_history(self) -> None:
+        llm_low = self._registry.get_low()
+
         async def summarize_fn(text: str) -> str:
-            messages = [
-                {"role": "system", "content": "你是一个对话摘要助手。请将给定的对话内容压缩为简洁的摘要。"},
-                {"role": "user", "content": text},
-            ]
-            response = await self._llm.complete(messages, tools=None)
-            return response.content or ""
+            return await llm_low.simple_chat(
+                text,
+                system_prompt="你是一个对话摘要助手。请将给定的对话内容压缩为简洁的摘要。",
+            )
 
         try:
             await self._ctx.compress(summarize_fn)

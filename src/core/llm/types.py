@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Protocol
+
+
+class ModelTier(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 
 @dataclass
 class LLMConfig:
-    provider: str = "openai"
+    provider: str = ""
     api_key: str = ""
-    base_url: str = "https://api.deepseek.com/v1"
-    model: str = "deepseek-chat"
+    base_url: str = ""
+    model: str = ""
     temperature: float = 0.7
     max_tokens: int = 4096
+    max_retries: int = 3
 
 
 @dataclass
@@ -36,6 +44,7 @@ class LLMResponse:
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
+    finish_reason: str = "stop"
 
     @property
     def has_tool_calls(self) -> bool:
@@ -49,3 +58,9 @@ class ILLMService(Protocol):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> LLMResponse: ...
+
+    async def simple_chat(
+        self,
+        user_input: str,
+        system_prompt: str = "",
+    ) -> str: ...

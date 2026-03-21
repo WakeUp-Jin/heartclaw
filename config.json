@@ -1,0 +1,51 @@
+{
+  "app": {
+    "log_level": "INFO",
+    "sqlite_db_path": "./data/pineclaw.db"
+  },
+  "feishu": {
+    "app_id": "${FEISHU_APP_ID}",
+    "app_secret": "${FEISHU_APP_SECRET}",
+    "verification_token": "${FEISHU_VERIFICATION_TOKEN}",
+    "encrypt_key": "${FEISHU_ENCRYPT_KEY}",
+    "memory_folder_name": "PineClaw"
+  },
+  "llm": {
+    "models": {
+      "high": {
+        "provider": "kimi",
+        "model": "kimi-k2.5",
+        "api_key": "${KIMI_API_KEY}",
+        "base_url": "https://api.moonshot.cn/v1",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "medium": {
+        "provider": "kimi",
+        "model": "kimi-k2.5",
+        "api_key": "${KIMI_API_KEY}",
+        "base_url": "https://api.moonshot.cn/v1",
+        "temperature": 0.7,
+        "max_tokens": 4096
+      },
+      "low": {
+        "provider": "volcengine",
+        "model": "doubao-seed-2.0-lite",
+        "api_key": "${VOLCENGINE_API_KEY}",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "temperature": 0.7,
+        "max_tokens": 2048
+      }
+    },
+    "retry": {
+      "max_retries": 3,
+      "base_delay": 1.0,
+      "max_delay": 30.0
+    }
+  },
+  "chat": {
+    "history_dir": "./data/chat_history",
+    "max_token_estimate": 60000,
+    "compress_keep_ratio": 0.3
+  }
+}

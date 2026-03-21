@@ -1,3 +1,3 @@
-from utils.logger import logger
+from utils.logger import logger, get_logger
 
-__all__ = ["logger"]
+__all__ = ["logger", "get_logger"]

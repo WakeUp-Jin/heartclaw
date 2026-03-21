@@ -5,7 +5,9 @@ from typing import Any, TYPE_CHECKING
 
 from core.llm.types import LLMResponse, TokenUsage
 from core.tool.types import ToolCallStatus
-from utils import logger
+from utils.logger import get_logger
+
+logger = get_logger("llm.tool_loop")
 
 if TYPE_CHECKING:
     from core.llm.services.base import BaseLLMService

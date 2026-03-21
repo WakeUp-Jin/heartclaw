@@ -6,10 +6,9 @@ import uvicorn
 from fastapi import FastAPI
 
 from config.settings import settings
-from utils import logger
+from utils.logger import logger, set_log_level
 
-from core.llm.types import LLMConfig
-from core.llm.factory import create_llm_service
+from core.llm.registry import LLMServiceRegistry
 from core.context.chat_store import ChatStore
 from core.context.manager import ContextManager
 from core.context.modules.system_prompt import SystemPromptContext
@@ -36,6 +35,8 @@ from api.routes.card_callback import set_approval_store
 async def startup() -> None:
     logger.info("=== PineClaw starting ===")
 
+    set_log_level(settings.log_level)
+
     # 1. Feishu Client
     feishu_client = FeishuClient(
         app_id=settings.feishu_app_id,
@@ -43,15 +44,11 @@ async def startup() -> None:
     )
     logger.info("FeishuClient created")
 
-    # 2. LLM Service
-    llm_config = LLMConfig(
-        provider=settings.llm_provider,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
-        model=settings.llm_model,
-    )
-    llm = create_llm_service(llm_config)
-    logger.info("LLM Service created: provider=%s, model=%s", llm_config.provider, llm_config.model)
+    # 2. LLM Service Registry
+    llm_registry = LLMServiceRegistry(settings)
+    llm_registry.get_high()
+    llm_registry.get_low()
+    logger.info("LLMServiceRegistry initialized (HIGH + LOW preloaded)")
 
     # 3. Tool Manager + register tools
     tool_manager = ToolManager()
@@ -102,7 +99,7 @@ async def startup() -> None:
 
     # 8. Agent
     agent = SimpleAgent(
-        llm=llm,
+        llm_registry=llm_registry,
         context_manager=context_manager,
         scheduler=scheduler,
     )

@@ -8,11 +8,14 @@ from core.llm.types import LLMConfig, LLMResponse, TokenUsage, ToolCall
 from core.llm.services.base import BaseLLMService
 from utils.logger import get_logger
 
-logger = get_logger("llm.openai")
+logger = get_logger("llm.volcengine")
 
 
-class OpenAIService(BaseLLMService):
-    """OpenAI / DeepSeek 兼容服务实现（通用 OpenAI SDK 格式）。"""
+class VolcEngineService(BaseLLMService):
+    """火山引擎 / Doubao 服务实现。
+
+    兼容 OpenAI SDK，默认 base_url: https://ark.cn-beijing.volces.com/api/v3
+    """
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
@@ -39,7 +42,7 @@ class OpenAIService(BaseLLMService):
             params["tool_choice"] = "auto"
 
         logger.debug(
-            "OpenAI request: model=%s, messages=%d",
+            "VolcEngine request: model=%s, messages=%d",
             self.config.model,
             len(messages),
         )
@@ -70,7 +73,7 @@ class OpenAIService(BaseLLMService):
         finish_reason = choice.finish_reason or "stop"
 
         logger.debug(
-            "OpenAI response: content_len=%s, tool_calls=%d, tokens=%d, finish=%s",
+            "VolcEngine response: content_len=%s, tool_calls=%d, tokens=%d, finish=%s",
             len(message.content) if message.content else 0,
             len(tool_calls),
             usage.total_tokens,

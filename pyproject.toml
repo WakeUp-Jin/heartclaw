@@ -9,7 +9,6 @@ dependencies = [
     "uvicorn[standard]",
     "openai",
     "aiosqlite",
-    "pydantic-settings",
 ]
 
 [build-system]
