@@ -9,9 +9,14 @@ from config.settings import settings
 from utils.logger import logger, set_log_level
 
 from core.llm.registry import LLMServiceRegistry
-from core.context.chat_store import ChatStore
 from core.context.manager import ContextManager
+from core.context.types import CompressionConfig
 from core.context.modules.system_prompt import SystemPromptContext
+from core.context.modules.long_term_memory import LongTermMemoryContext
+from core.context.modules.short_term_memory import ShortTermMemoryContext
+from core.context.modules.tool_context import ToolContext
+from core.context.storage.jsonl_store import JsonlContextStorage
+from core.context.utils.compressor import ContextCompressor
 from core.tool.manager import ToolManager
 from core.tool.scheduler import ToolScheduler, ToolSchedulerConfig
 from core.tool.approval import ApprovalStore
@@ -22,7 +27,6 @@ from core.tool.memory_tools import register_memory_tools
 from core.agent.simple_agent import SimpleAgent
 
 from memory.memory_store import MemoryStore
-from memory.memory_context import MemoryContext
 
 from channels.feishu.channel import FeishuChannel
 from channels.registry import get_all_channels, register_channel
@@ -64,22 +68,31 @@ async def startup() -> None:
     register_memory_tools(tool_manager, memory_store)
     logger.info("Memory tools registered, total: %d tools", len(tool_manager.list_tools()))
 
-    # 5. Chat Store (persistent conversation history)
-    chat_store = ChatStore(history_dir=settings.chat_history_dir)
+    # 5. Context modules
+    storage = JsonlContextStorage(history_dir=settings.chat_history_dir)
     logger.info(
-        "ChatStore initialized: dir=%s, session=%s",
+        "JsonlContextStorage initialized: dir=%s, session=%s",
         settings.chat_history_dir,
-        chat_store.session_file,
+        storage.session_file,
     )
 
-    # 6. Context Manager
-    memory_ctx = MemoryContext(memory_store)
-    context_manager = ContextManager(
-        chat_store=chat_store,
-        system_prompt=SystemPromptContext(),
-        memory=memory_ctx,
+    compressor = ContextCompressor()
+    short_term = ShortTermMemoryContext(storage=storage, compressor=compressor)
+    long_term = LongTermMemoryContext(memory_store=memory_store)
+    system_prompt = SystemPromptContext()
+    tool_context = ToolContext()
+
+    compression_config = CompressionConfig(
         max_token_estimate=settings.chat_max_token_estimate,
         compress_keep_ratio=settings.chat_compress_keep_ratio,
+    )
+
+    context_manager = ContextManager(
+        system_prompt=system_prompt,
+        short_term_memory=short_term,
+        tool_context=tool_context,
+        long_term_memory=long_term,
+        compression_config=compression_config,
     )
     logger.info("ContextManager created")
 

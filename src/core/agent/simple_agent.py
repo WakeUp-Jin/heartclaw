@@ -39,6 +39,7 @@ class SimpleAgent:
         if user_text.strip() in CLEAR_COMMANDS:
             return self._handle_clear()
 
+        # User message -> short-term memory via ContextManager routing
         self._ctx.append_message({"role": "user", "content": user_text})
 
         messages = self._ctx.get_context()
@@ -51,9 +52,14 @@ class SimpleAgent:
 
         self._token_counter.add(usage.prompt_tokens, usage.completion_tokens)
 
+        # Intermediate messages (assistant+tool_calls, tool responses) -> tool context
         for msg in tool_messages:
             self._ctx.append_message(msg)
 
+        # Archive tool context into short-term memory
+        self._ctx.archive_tool_context()
+
+        # Final assistant response -> short-term memory
         self._ctx.append_message({"role": "assistant", "content": response_text})
 
         logger.info(

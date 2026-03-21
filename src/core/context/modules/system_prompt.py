@@ -1,8 +1,19 @@
+"""Segmented system prompt context.
+
+The system prompt is composed of ordered segments, each with an id, priority,
+and enable flag.  Core segments are defined by the system; dynamic segments
+can be registered by external modules (e.g. user-defined prompts loaded from
+files, tool descriptions, memory injection, etc.).
+
+Segments are assembled in **descending** priority order (higher priority
+appears earlier in the final prompt) and merged into a single ``system``
+ContextItem.
+"""
+
 from __future__ import annotations
 
-from typing import Any
-
 from core.context.base import BaseContext
+from core.context.types import ContextItem, MessagePriority, PromptSegment
 
 DEFAULT_SYSTEM_PROMPT = """\
 你是 PineClaw，一个基于飞书的个人 AI 助手。你可以帮助用户：
@@ -31,13 +42,78 @@ DEFAULT_SYSTEM_PROMPT = """\
 用自然语言告知用户结果。\
 """
 
+CORE_SEGMENT_ID = "core"
+CORE_SEGMENT_PRIORITY = 100
 
-class SystemPromptContext(BaseContext):
-    def __init__(self, prompt: str | None = None):
-        self._prompt = prompt or DEFAULT_SYSTEM_PROMPT
 
-    def set_prompt(self, prompt: str) -> None:
-        self._prompt = prompt
+class SystemPromptContext(BaseContext[PromptSegment]):
+    """Segmented system prompt supporting dynamic registration."""
 
-    def get_messages(self) -> list[dict[str, Any]]:
-        return [{"role": "system", "content": self._prompt}]
+    def __init__(self, core_prompt: str | None = None) -> None:
+        super().__init__()
+        self.add(PromptSegment(
+            id=CORE_SEGMENT_ID,
+            content=core_prompt or DEFAULT_SYSTEM_PROMPT,
+            priority=CORE_SEGMENT_PRIORITY,
+        ))
+
+    # ------------------------------------------------------------------
+    # Segment management
+    # ------------------------------------------------------------------
+
+    def register_segment(self, segment: PromptSegment) -> None:
+        """Register a new segment.  Replaces existing segment with same id."""
+        self._items = [s for s in self._items if s.id != segment.id]
+        self.add(segment)
+
+    def update_segment(self, segment_id: str, content: str) -> None:
+        for seg in self._items:
+            if seg.id == segment_id:
+                seg.content = content
+                return
+
+    def remove_segment(self, segment_id: str) -> None:
+        self._items = [s for s in self._items if s.id != segment_id]
+
+    def enable_segment(self, segment_id: str) -> None:
+        for seg in self._items:
+            if seg.id == segment_id:
+                seg.enabled = True
+                return
+
+    def disable_segment(self, segment_id: str) -> None:
+        for seg in self._items:
+            if seg.id == segment_id:
+                seg.enabled = False
+                return
+
+    def get_segment(self, segment_id: str) -> PromptSegment | None:
+        for seg in self._items:
+            if seg.id == segment_id:
+                return seg
+        return None
+
+    # ------------------------------------------------------------------
+    # Prompt assembly
+    # ------------------------------------------------------------------
+
+    def get_prompt(self) -> str:
+        """Return the full assembled prompt string (enabled segments only)."""
+        enabled = [s for s in self._items if s.enabled]
+        enabled.sort(key=lambda s: s.priority, reverse=True)
+        return "\n\n".join(s.content for s in enabled if s.content.strip())
+
+    # ------------------------------------------------------------------
+    # BaseContext interface
+    # ------------------------------------------------------------------
+
+    def format(self) -> list[ContextItem]:
+        prompt = self.get_prompt()
+        if not prompt:
+            return []
+        return [ContextItem(
+            role="system",
+            content=prompt,
+            source="system_prompt",
+            priority=MessagePriority.CRITICAL,
+        )]

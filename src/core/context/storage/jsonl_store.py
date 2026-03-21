@@ -1,9 +1,10 @@
-"""ChatStore: append-only JSONL persistence + checkpoint for compression state.
+"""JSONL-based context storage implementation.
 
-File layout:
+Refactored from the original ``ChatStore``.  File layout::
+
     data/chat_history/
         session_20260311_143022.jsonl            <- all messages, append-only
-        session_20260311_143022.checkpoint.json  <- compression state (if compressed)
+        session_20260311_143022.checkpoint.json  <- compression state (if any)
 """
 
 from __future__ import annotations
@@ -13,23 +14,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.context.storage.base import IContextStorage
 from utils import logger
 
 
-class ChatStore:
-    """Pure I/O layer for chat history persistence."""
+class JsonlContextStorage(IContextStorage):
+    """Append-only JSONL persistence with checkpoint support."""
 
-    def __init__(self, history_dir: str):
+    def __init__(self, history_dir: str) -> None:
         self._dir = Path(history_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._session_file: Path = self._find_or_create_session()
 
     # ------------------------------------------------------------------
-    # Message I/O
+    # IContextStorage implementation
     # ------------------------------------------------------------------
 
     def append(self, message: dict[str, Any]) -> None:
-        """Append a single message to the current session JSONL."""
         try:
             with open(self._session_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(message, ensure_ascii=False) + "\n")
@@ -37,11 +38,9 @@ class ChatStore:
             logger.error("Failed to append message: %s", e)
 
     def load_all(self) -> list[dict[str, Any]]:
-        """Load all messages from the current session JSONL."""
         return self._read_jsonl(self._session_file)
 
     def load_from_line(self, line_number: int) -> list[dict[str, Any]]:
-        """Load messages starting from a specific line number (0-based)."""
         messages: list[dict[str, Any]] = []
         try:
             with open(self._session_file, "r", encoding="utf-8") as f:
@@ -55,19 +54,13 @@ class ChatStore:
         return messages
 
     def count_lines(self) -> int:
-        """Count total lines in the current session JSONL."""
         try:
             with open(self._session_file, "r", encoding="utf-8") as f:
                 return sum(1 for line in f if line.strip())
         except Exception:
             return 0
 
-    # ------------------------------------------------------------------
-    # Checkpoint I/O
-    # ------------------------------------------------------------------
-
     def save_checkpoint(self, summary: str, checkpoint_line: int) -> None:
-        """Write compression checkpoint to disk."""
         data = {
             "summary": summary,
             "checkpoint_line": checkpoint_line,
@@ -81,7 +74,6 @@ class ChatStore:
             logger.error("Failed to save checkpoint: %s", e)
 
     def load_checkpoint(self) -> dict[str, Any] | None:
-        """Load checkpoint if it exists. Returns {summary, checkpoint_line} or None."""
         cp_path = self._checkpoint_path()
         if not cp_path.exists():
             return None
@@ -92,15 +84,14 @@ class ChatStore:
             logger.error("Failed to load checkpoint: %s", e)
             return None
 
-    # ------------------------------------------------------------------
-    # Session management
-    # ------------------------------------------------------------------
-
     def new_session(self) -> None:
-        """Create a new session file. Old files are preserved on disk."""
         old = self._session_file
         self._session_file = self._create_session_file()
         logger.info("New session created. Old: %s, New: %s", old.name, self._session_file.name)
+
+    # ------------------------------------------------------------------
+    # Extra properties
+    # ------------------------------------------------------------------
 
     @property
     def session_file(self) -> Path:
@@ -111,7 +102,6 @@ class ChatStore:
     # ------------------------------------------------------------------
 
     def _find_or_create_session(self) -> Path:
-        """Find the most recent session JSONL or create a new one."""
         jsonl_files = sorted(self._dir.glob("session_*.jsonl"), reverse=True)
         session_files = [f for f in jsonl_files if not f.name.endswith(".checkpoint.json")]
         if session_files:

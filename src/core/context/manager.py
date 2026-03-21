@@ -1,172 +1,168 @@
-"""ContextManager: loading strategy, context assembly, compression trigger."""
+"""ContextManager — unified orchestrator for all context modules.
+
+Coordinates SystemPromptContext, LongTermMemoryContext, ShortTermMemoryContext
+and ToolContext to build the message sequence sent to the LLM.
+
+Internally every module works with ``ContextItem``; the public
+``get_context()`` method converts the assembled items into plain message
+dicts via ``_to_messages()``.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Callable, Awaitable, TYPE_CHECKING
+from typing import Any, Callable, Awaitable
 
-from core.context.chat_store import ChatStore
+from core.context.types import ContextItem, CompressionConfig, MessagePriority
 from core.context.modules.system_prompt import SystemPromptContext
+from core.context.modules.short_term_memory import ShortTermMemoryContext
+from core.context.modules.tool_context import ToolContext
+from core.context.utils.message_sanitizer import sanitize_messages
+from core.context.utils.token_estimator import TokenEstimator
 from utils import logger
 
+from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from core.context.modules.memory import MemoryContext
-
-
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: Chinese ~2 chars/token, other ~4 chars/token."""
-    cn = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-    other = len(text) - cn
-    return cn // 2 + other // 4
-
-
-def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
-    total = 0
-    for m in messages:
-        total += _estimate_tokens(m.get("content", "") or "")
-        for tc in m.get("tool_calls", []):
-            fn = tc.get("function", {})
-            total += _estimate_tokens(fn.get("arguments", ""))
-    return total
+    from core.context.modules.long_term_memory import LongTermMemoryContext
 
 
 class ContextManager:
+    """Assembles the full LLM context from individual context modules."""
+
     def __init__(
         self,
-        chat_store: ChatStore,
-        system_prompt: SystemPromptContext | None = None,
-        memory: MemoryContext | None = None,
-        max_token_estimate: int = 60000,
-        compress_keep_ratio: float = 0.3,
-    ):
-        self._store = chat_store
-        self._system_prompt = system_prompt or SystemPromptContext()
-        self._memory = memory
-        self._max_token_estimate = max_token_estimate
-        self._compress_keep_ratio = compress_keep_ratio
-
-        self._summary: str = ""
-        self._messages: list[dict[str, Any]] = []
-
-        self._load_session()
+        system_prompt: SystemPromptContext,
+        short_term_memory: ShortTermMemoryContext,
+        tool_context: ToolContext | None = None,
+        long_term_memory: LongTermMemoryContext | None = None,
+        compression_config: CompressionConfig | None = None,
+    ) -> None:
+        self._system_prompt = system_prompt
+        self._short_term = short_term_memory
+        self._tool_context = tool_context or ToolContext()
+        self._long_term = long_term_memory
+        self._config = compression_config or CompressionConfig()
+        self._estimator = TokenEstimator()
 
     # ------------------------------------------------------------------
-    # Message operations (called by Agent)
+    # Public API (called by Agent)
     # ------------------------------------------------------------------
 
     def append_message(self, message: dict[str, Any]) -> None:
-        """Append a message to both memory and disk."""
-        self._messages.append(message)
-        self._store.append(message)
+        """Append a message.  Internally converts to ContextItem and routes
+        to the appropriate module (tool context or short-term memory)."""
+        role = message.get("role", "")
+        has_tool_calls = bool(message.get("tool_calls"))
+        is_tool_response = role == "tool"
 
-    # ------------------------------------------------------------------
-    # Context assembly (called by Agent before LLM)
-    # ------------------------------------------------------------------
+        item = ContextItem.from_message(message, source="conversation")
+
+        if has_tool_calls:
+            item.source = "tool"
+            item.priority = MessagePriority.HIGH
+            self._tool_context.add_tool_call(item)
+        elif is_tool_response:
+            item.source = "tool"
+            item.priority = MessagePriority.HIGH
+            self._tool_context.add_tool_response(item)
+        else:
+            self._short_term.append_message(item)
 
     def get_context(self) -> list[dict[str, Any]]:
-        """Build LLM context: system_prompt + memory + summary(if any) + messages."""
-        ctx: list[dict[str, Any]] = []
-
-        ctx.extend(self._system_prompt.get_messages())
-
-        if self._memory is not None:
-            ctx.extend(self._memory.get_messages())
-
-        if self._summary:
-            ctx.append({
-                "role": "system",
-                "content": f"以下是之前对话的压缩摘要：\n\n{self._summary}",
-            })
-
-        ctx.extend(self._messages)
-        return ctx
-
-    # ------------------------------------------------------------------
-    # Compression
-    # ------------------------------------------------------------------
+        """Build the full LLM context: assemble ContextItems then convert to
+        message dicts."""
+        items = self._build_context_items()
+        return self._to_messages(items)
 
     def needs_compression(self) -> bool:
-        return self.estimate_tokens() > self._max_token_estimate
-
-    def estimate_tokens(self) -> int:
-        total = _estimate_messages_tokens(self._messages)
-        if self._summary:
-            total += _estimate_tokens(self._summary)
-        return total
+        return self._short_term.needs_compression(
+            self._config.max_token_estimate,
+            self._config.compression_threshold,
+        )
 
     async def compress(self, summarize_fn: Callable[[str], Awaitable[str]]) -> None:
-        """Compress: LLM summarizes older 70%, keep recent 30%. JSONL untouched."""
-        if not self._messages:
-            return
+        """Trigger compression on short-term memory."""
+        # Archive any pending tool context first
+        if not self._tool_context.is_empty():
+            self._tool_context.archive_to(self._short_term)
 
-        total = len(self._messages)
-        keep_count = max(2, int(total * self._compress_keep_ratio))
-        compress_count = total - keep_count
-
-        if compress_count <= 0:
-            return
-
-        to_compress = self._messages[:compress_count]
-        to_keep = self._messages[compress_count:]
-
-        parts = []
-        if self._summary:
-            parts.append(f"之前的摘要：\n{self._summary}\n")
-        for m in to_compress:
-            role = {"user": "用户", "assistant": "助手", "tool": "工具"}.get(m["role"], m["role"])
-            parts.append(f"{role}: {m.get('content', '') or ''}")
-        compress_text = "\n".join(parts)
-
-        prompt = (
-            "请将以下对话记录压缩为简洁的摘要，保留关键信息、用户意图、重要决策和结论。"
-            "摘要应当让后续对话能理解之前的上下文。使用中文。\n\n"
-            f"{compress_text}"
+        result = await self._short_term.compress(
+            summarize_fn,
+            keep_ratio=self._config.compress_keep_ratio,
         )
+        if result.compressed:
+            logger.info(
+                "Compression done, estimated tokens now: %d",
+                self.estimate_tokens(),
+            )
 
-        try:
-            summary = await summarize_fn(prompt)
-        except Exception as e:
-            logger.error("Compression failed: %s", e)
-            return
-
-        checkpoint_line = self._store.count_lines() - keep_count
-        self._store.save_checkpoint(summary, checkpoint_line)
-
-        self._summary = summary
-        self._messages = to_keep
-
-        logger.info(
-            "Compressed: %d messages -> summary + %d recent, checkpoint at line %d",
-            total, keep_count, checkpoint_line,
-        )
-
-    # ------------------------------------------------------------------
-    # Clear / new session
-    # ------------------------------------------------------------------
+    def estimate_tokens(self) -> int:
+        items = self._build_context_items()
+        return self._estimator.estimate_items(items)
 
     def clear_conversation(self) -> None:
-        """Start a new session. Old JSONL preserved on disk."""
-        self._store.new_session()
-        self._messages.clear()
-        self._summary = ""
+        """Clear short-term memory and tool context, starting a new session."""
+        self._short_term.clear()
+        self._tool_context.clear()
         logger.info("Conversation cleared, new session started")
 
+    def archive_tool_context(self) -> None:
+        """Archive current tool context into short-term memory.
+
+        Called by the Agent after the tool loop completes for a turn.
+        """
+        if not self._tool_context.is_empty():
+            self._tool_context.archive_to(self._short_term)
+
     # ------------------------------------------------------------------
-    # Internal: session loading
+    # Module accessors
     # ------------------------------------------------------------------
 
-    def _load_session(self) -> None:
-        """Load messages from disk, respecting checkpoint if present."""
-        checkpoint = self._store.load_checkpoint()
+    @property
+    def system_prompt(self) -> SystemPromptContext:
+        return self._system_prompt
 
-        if checkpoint:
-            self._summary = checkpoint.get("summary", "")
-            checkpoint_line = checkpoint.get("checkpoint_line", 0)
-            self._messages = self._store.load_from_line(checkpoint_line)
-            logger.info(
-                "Loaded session with checkpoint: summary=%d chars, %d messages from line %d",
-                len(self._summary), len(self._messages), checkpoint_line,
-            )
-        else:
-            self._summary = ""
-            self._messages = self._store.load_all()
-            logger.info("Loaded session: %d messages (no checkpoint)", len(self._messages))
+    @property
+    def short_term_memory(self) -> ShortTermMemoryContext:
+        return self._short_term
+
+    @property
+    def tool_context(self) -> ToolContext:
+        return self._tool_context
+
+    @property
+    def long_term_memory(self) -> LongTermMemoryContext | None:
+        return self._long_term
+
+    # ------------------------------------------------------------------
+    # Private: context assembly
+    # ------------------------------------------------------------------
+
+    def _build_context_items(self) -> list[ContextItem]:
+        """Assemble items in canonical order:
+        1. system prompt
+        2. long-term memory
+        3. short-term memory (summary + history)
+        4. tool context (current turn)
+        """
+        items: list[ContextItem] = []
+
+        items.extend(self._system_prompt.format())
+
+        if self._long_term is not None:
+            items.extend(self._long_term.format())
+
+        items.extend(self._short_term.format())
+
+        items.extend(self._tool_context.format())
+
+        return items
+
+    def _to_messages(self, items: list[ContextItem]) -> list[dict[str, Any]]:
+        """Convert ContextItem list to message dicts and sanitise."""
+        messages = [item.to_message() for item in items]
+        return self._sanitize(messages)
+
+    @staticmethod
+    def _sanitize(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sanitize_messages(messages)
