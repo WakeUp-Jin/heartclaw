@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from core.llm.utils.tool_loop import execute_tool_loop
+from core.engine import ExecutionEngine
+from core.tool.tools.read_file import ReadFileTool
 from utils.logger import get_logger
 from utils.token_counter import TokenCounter
 
 if TYPE_CHECKING:
     from core.llm.registry import LLMServiceRegistry
     from core.context.manager import ContextManager
+    from core.tool.manager import ToolManager
     from core.tool.scheduler import ToolScheduler
 
 logger = get_logger("agent")
@@ -16,18 +18,24 @@ logger = get_logger("agent")
 CLEAR_COMMANDS = {"清空聊天记录", "清空历史记录", "清空对话", "/clear"}
 
 
-class SimpleAgent:
+class Agent:
     def __init__(
         self,
         llm_registry: LLMServiceRegistry,
         context_manager: ContextManager,
+        tool_manager: ToolManager,
         scheduler: ToolScheduler,
         token_counter: TokenCounter | None = None,
     ):
         self._registry = llm_registry
         self._ctx = context_manager
+        self._tool_manager = tool_manager
         self._scheduler = scheduler
         self._token_counter = token_counter or TokenCounter()
+
+        self._register_tools()
+
+        self._engine = ExecutionEngine(scheduler=scheduler)
 
     @property
     def token_counter(self) -> TokenCounter:
@@ -39,27 +47,23 @@ class SimpleAgent:
         if user_text.strip() in CLEAR_COMMANDS:
             return self._handle_clear()
 
-        # User message -> short-term memory via ContextManager routing
         self._ctx.append_message({"role": "user", "content": user_text})
 
         messages = self._ctx.get_context()
-        tools = self._scheduler.tool_manager.get_formatted_tools()
-
+        tools = self._tool_manager.get_formatted_tools()
         llm = self._registry.get_high()
-        response_text, usage, tool_messages = await execute_tool_loop(
-            llm, messages, tools, self._scheduler, chat_id=chat_id,
+
+        response_text, usage, tool_messages = await self._engine.run(
+            llm, messages, tools, chat_id=chat_id,
         )
 
         self._token_counter.add(usage.prompt_tokens, usage.completion_tokens)
 
-        # Intermediate messages (assistant+tool_calls, tool responses) -> tool context
         for msg in tool_messages:
             self._ctx.append_message(msg)
 
-        # Archive tool context into short-term memory
         self._ctx.archive_tool_context()
 
-        # Final assistant response -> short-term memory
         self._ctx.append_message({"role": "assistant", "content": response_text})
 
         logger.info(
@@ -72,6 +76,15 @@ class SimpleAgent:
             await self._compress_history()
 
         return response_text
+
+    # ------------------------------------------------------------------
+    # Private
+    # ------------------------------------------------------------------
+
+    def _register_tools(self) -> None:
+        """注册 tools/ 目录下的内置工具。"""
+        self._tool_manager.register(ReadFileTool)
+        logger.info("Built-in tools registered: %s", self._tool_manager.list_tools())
 
     def _handle_clear(self) -> str:
         self._ctx.clear_conversation()

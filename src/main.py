@@ -23,8 +23,7 @@ from core.tool.types import ApprovalMode
 from core.tool.feishu.client import FeishuClient
 from core.tool.feishu import register_feishu_tools
 from core.tool.memory_tools import register_memory_tools
-from core.tool.tools.read_file import ReadFileTool
-from core.agent.simple_agent import SimpleAgent
+from core.agent.agent import Agent
 
 from storage.conversation_store import ConversationStore
 from storage.memory_store import LocalMemoryStore
@@ -55,11 +54,10 @@ async def startup() -> None:
     llm_registry.get_low()
     logger.info("LLMServiceRegistry initialized (HIGH + LOW preloaded)")
 
-    # 3. Tool Manager + register tools
+    # 3. Tool Manager + register external tools (feishu)
     tool_manager = ToolManager()
-    tool_manager.register(ReadFileTool)
     register_feishu_tools(tool_manager, feishu_client)
-    logger.info("Tools registered: %d tools", len(tool_manager.list_tools()))
+    logger.info("External tools registered: %d tools", len(tool_manager.list_tools()))
 
     # 4. Local Memory Store (replaces Feishu-based MemoryStore)
     memory_store = LocalMemoryStore(base_dir=settings.memory_dir)
@@ -109,13 +107,14 @@ async def startup() -> None:
     logger.info("ToolScheduler created (mode=%s)", scheduler_config.approval_mode.value)
 
     # 8. Agent
-    agent = SimpleAgent(
+    agent = Agent(
         llm_registry=llm_registry,
         context_manager=context_manager,
+        tool_manager=tool_manager,
         scheduler=scheduler,
     )
     set_agent(agent)
-    logger.info("SimpleAgent created")
+    logger.info("Agent created")
 
     # 9. Feishu Channel
     async def on_message(text: str, chat_id: str, open_id: str) -> str:
