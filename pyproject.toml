@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]",
     "openai",
     "aiosqlite",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
