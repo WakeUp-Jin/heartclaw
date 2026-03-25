@@ -5,7 +5,7 @@ ContextItem as the internal representation, plus configuration and result types.
 
 Two serialisation formats exist for ContextItem:
 - ``to_message()`` / ``from_message()``: LLM API format (role/content/tool_calls only).
-- ``to_dict()`` / ``from_dict()``: Full persistence format (all metadata + thinking + cost).
+- ``to_dict()`` / ``from_dict()``: Full persistence format (all metadata + thinking + usage).
 """
 
 from __future__ import annotations
@@ -24,6 +24,39 @@ class MessagePriority(IntEnum):
 
 
 @dataclass
+class ItemUsage:
+    """Token usage and cost for a single context item.
+
+    Only populated on assistant messages (one LLM call = one usage record).
+    User messages keep all fields at zero.
+    """
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    total_tokens: int = 0
+    cost: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "cached_tokens": self.cached_tokens,
+            "total_tokens": self.total_tokens,
+            "cost": self.cost,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ItemUsage:
+        return cls(
+            prompt_tokens=d.get("prompt_tokens", 0),
+            completion_tokens=d.get("completion_tokens", 0),
+            cached_tokens=d.get("cached_tokens", 0),
+            total_tokens=d.get("total_tokens", 0),
+            cost=d.get("cost", 0.0),
+        )
+
+
+@dataclass
 class ContextItem:
     """Rich data structure for internal context flow.
 
@@ -36,7 +69,6 @@ class ContextItem:
     source: str = ""
     priority: int = MessagePriority.NORMAL
     created_at: float = field(default_factory=time.time)
-    token_estimate: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # tool-related fields
@@ -48,8 +80,8 @@ class ContextItem:
     thinking: str | None = None
     thinking_token_estimate: int = 0
 
-    # cost in CNY (calculated from config price per million tokens)
-    cost: float = 0.0
+    # token usage + cost (only meaningful on assistant messages)
+    usage: ItemUsage = field(default_factory=ItemUsage)
 
     # ------------------------------------------------------------------
     # LLM API format (minimal, only fields the model recognises)
@@ -104,33 +136,37 @@ class ContextItem:
             "source": self.source,
             "priority": self.priority,
             "created_at": self.created_at,
-            "token_estimate": self.token_estimate,
             "metadata": self.metadata,
             "tool_calls": self.tool_calls,
             "tool_call_id": self.tool_call_id,
             "name": self.name,
             "thinking": self.thinking,
             "thinking_token_estimate": self.thinking_token_estimate,
-            "cost": self.cost,
+            "usage": self.usage.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ContextItem:
         """Restore from a JSONL line (persistence format)."""
+        usage_raw = d.get("usage")
+        if isinstance(usage_raw, dict):
+            usage = ItemUsage.from_dict(usage_raw)
+        else:
+            usage = ItemUsage()
+
         return cls(
             role=d.get("role", "user"),
             content=d.get("content"),
             source=d.get("source", ""),
             priority=d.get("priority", MessagePriority.NORMAL),
             created_at=d.get("created_at", 0.0),
-            token_estimate=d.get("token_estimate", 0),
             metadata=d.get("metadata", {}),
             tool_calls=d.get("tool_calls", []),
             tool_call_id=d.get("tool_call_id"),
             name=d.get("name"),
             thinking=d.get("thinking"),
             thinking_token_estimate=d.get("thinking_token_estimate", 0),
-            cost=d.get("cost", 0.0),
+            usage=usage,
         )
 
 

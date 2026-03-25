@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from config.settings import settings
 from core.engine import ExecutionEngine
-from core.context.types import ContextItem, MessagePriority
+from core.context.types import ContextItem, ItemUsage, MessagePriority
 from core.tool.tools.bash import BashTool
 from core.tool.tools.read_file import ReadFileTool
 from core.tool.tools.list_files import ListFilesTool
@@ -51,15 +51,13 @@ class Agent:
         if user_text.strip() in CLEAR_COMMANDS:
             return self._handle_clear()
 
-        model_cfg = settings.get_model_config("high")
-
-        user_item = ContextItem.from_message(
-            {"role": "user", "content": user_text},
+        user_item = ContextItem(
+            role="user",
+            content=user_text,
             source="user",
             priority=MessagePriority.HIGH,
         )
-        user_item.cost = model_cfg.calc_cost(user_item.token_estimate, direction="input")
-        self._ctx.append_message(user_item.to_message())
+        self._ctx.append_item(user_item)
 
         messages = self._ctx.get_context()
         tools = self._tool_manager.get_formatted_tools()
@@ -74,24 +72,32 @@ class Agent:
 
         self._ctx.archive_tool_context()
 
-        assistant_item = ContextItem.from_message(
-            {"role": "assistant", "content": result.text},
+        model_cfg = settings.get_model_config("high")
+        cost = model_cfg.calc_cost(result.usage)
+
+        assistant_item = ContextItem(
+            role="assistant",
+            content=result.text,
             source="llm",
             priority=MessagePriority.HIGH,
+            thinking=result.thinking,
+            usage=ItemUsage(
+                prompt_tokens=result.usage.prompt_tokens,
+                completion_tokens=result.usage.completion_tokens,
+                cached_tokens=result.usage.cached_tokens,
+                total_tokens=result.usage.total_tokens,
+                cost=cost,
+            ),
         )
-        assistant_item.thinking = result.thinking
-        assistant_item.token_estimate = result.usage.completion_tokens
-        assistant_item.cost = model_cfg.calc_cost(
-            result.usage.completion_tokens, direction="output",
-        )
-        self._ctx.append_message(assistant_item.to_message())
+        self._ctx.append_item(assistant_item)
 
         logger.info(
-            "Agent done: tokens=%d (p=%d, c=%d), cost=%.4f CNY",
+            "Agent done: tokens=%d (p=%d, c=%d, cache=%d), cost=%.6f CNY",
             result.usage.total_tokens,
             result.usage.prompt_tokens,
             result.usage.completion_tokens,
-            assistant_item.cost,
+            result.usage.cached_tokens,
+            cost,
         )
 
         if self._ctx.needs_compression():

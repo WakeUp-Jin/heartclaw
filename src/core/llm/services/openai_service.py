@@ -62,9 +62,15 @@ class OpenAIService(BaseLLMService):
 
         usage = TokenUsage()
         if resp.usage:
+            cached = 0
+            if hasattr(resp.usage, "prompt_tokens_details") and resp.usage.prompt_tokens_details:
+                cached = getattr(resp.usage.prompt_tokens_details, "cached_tokens", 0) or 0
+            elif hasattr(resp.usage, "cached_tokens"):
+                cached = resp.usage.cached_tokens or 0
             usage = TokenUsage(
                 prompt_tokens=resp.usage.prompt_tokens,
                 completion_tokens=resp.usage.completion_tokens,
+                cached_tokens=cached,
             )
 
         finish_reason = choice.finish_reason or "stop"

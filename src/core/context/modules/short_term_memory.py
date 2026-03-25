@@ -150,7 +150,7 @@ class ShortTermMemoryContext(BaseContext[ContextItem]):
 
         If a checkpoint exists, loads summary + items after the checkpoint line.
         Otherwise loads everything.  Uses ``ContextItem.from_dict`` so all
-        persisted metadata (thinking, cost, token_estimate, etc.) is restored.
+        persisted metadata (thinking, usage, etc.) is restored.
         """
         checkpoint = self._storage.load_checkpoint()
 

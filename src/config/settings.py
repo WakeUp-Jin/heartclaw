@@ -5,7 +5,10 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.llm.types import TokenUsage
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)}")
 
@@ -43,7 +46,7 @@ _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
             "context_window": 131072,
             "max_tokens": 4096,
             "temperature": 1.0,
-            "cost": {"input": 2.0, "output": 8.0},
+            "cost": {"input_cached": 0.70, "input": 4.00, "output": 21.00},
         },
         "medium": {
             "id": "kimi-k2.5",
@@ -55,7 +58,7 @@ _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
             "context_window": 131072,
             "max_tokens": 4096,
             "temperature": 0.7,
-            "cost": {"input": 2.0, "output": 8.0},
+            "cost": {"input_cached": 0.70, "input": 4.00, "output": 21.00},
         },
         "low": {
             "id": "doubao-seed-2.0-lite",
@@ -67,7 +70,7 @@ _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
             "context_window": 32768,
             "max_tokens": 2048,
             "temperature": 0.7,
-            "cost": {"input": 0.3, "output": 0.6},
+            "cost": {"input_cached": 0.0, "input": 0.3, "output": 0.6},
         },
     },
     "memory": {
@@ -163,7 +166,14 @@ def _resolve_env_vars(obj: Any) -> Any:
 
 @dataclass
 class CostConfig:
-    """Price per million tokens in CNY (元/M tokens)."""
+    """Price per million tokens in CNY (元/M tokens).
+
+    Three dimensions matching LLM provider pricing:
+    - input_cached: input price when prompt cache hits
+    - input: input price when prompt cache misses
+    - output: output price
+    """
+    input_cached: float = 0.0
     input: float = 0.0
     output: float = 0.0
 
@@ -182,13 +192,17 @@ class ModelConfig:
     temperature: float = 0.7
     cost: CostConfig = field(default_factory=CostConfig)
 
-    def calc_cost(self, tokens: int, *, direction: str = "input") -> float:
-        """Calculate cost in CNY for a given token count.
+    def calc_cost(self, usage: TokenUsage) -> float:
+        """Calculate cost in CNY from a TokenUsage.
 
-        ``direction`` is ``"input"`` or ``"output"``.
+        Formula: (cached * input_cached + uncached * input + completion * output) / 1M
         """
-        price = self.cost.input if direction == "input" else self.cost.output
-        return tokens * price / 1_000_000
+        uncached_input = usage.prompt_tokens - usage.cached_tokens
+        return (
+            usage.cached_tokens * self.cost.input_cached
+            + uncached_input * self.cost.input
+            + usage.completion_tokens * self.cost.output
+        ) / 1_000_000
 
 
 @dataclass

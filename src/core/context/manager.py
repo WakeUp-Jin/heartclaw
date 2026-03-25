@@ -50,25 +50,23 @@ class ContextManager:
     # Public API (called by Agent)
     # ------------------------------------------------------------------
 
-    def append_message(self, message: dict[str, Any]) -> None:
-        """Append a message.  Internally converts to ContextItem and routes
-        to the appropriate module (tool context or short-term memory)."""
-        role = message.get("role", "")
-        has_tool_calls = bool(message.get("tool_calls"))
-        is_tool_response = role == "tool"
-
-        item = ContextItem.from_message(message, source="conversation")
-
-        if has_tool_calls:
-            item.source = "tool"
+    def append_item(self, item: ContextItem) -> None:
+        """Append a pre-built ContextItem, preserving all metadata (usage, thinking, etc.)."""
+        if item.tool_calls:
+            item.source = item.source or "tool"
             item.priority = MessagePriority.HIGH
             self._tool_context.add_tool_call(item)
-        elif is_tool_response:
-            item.source = "tool"
+        elif item.role == "tool":
+            item.source = item.source or "tool"
             item.priority = MessagePriority.HIGH
             self._tool_context.add_tool_response(item)
         else:
             self._short_term.append_message(item)
+
+    def append_message(self, message: dict[str, Any]) -> None:
+        """Append from a plain message dict (used for intermediate tool messages)."""
+        item = ContextItem.from_message(message, source="conversation")
+        self.append_item(item)
 
     def get_context(self) -> list[dict[str, Any]]:
         """Build the full LLM context: assemble ContextItems then convert to
