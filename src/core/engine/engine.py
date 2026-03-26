@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 from core.llm.types import LLMResponse, TokenUsage
 from core.tool.types import ToolCallStatus
@@ -28,7 +28,6 @@ class EngineResult:
     """Result of a full LLM-Tool execution loop."""
     text: str = ""
     usage: TokenUsage = field(default_factory=TokenUsage)
-    intermediate_messages: list[dict[str, Any]] = field(default_factory=list)
     thinking: str | None = None
 
 
@@ -52,11 +51,19 @@ class ExecutionEngine:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         chat_id: str = "",
+        on_message: Callable[[dict[str, Any]], None] | None = None,
     ) -> EngineResult:
-        """执行 LLM-Tool 循环。"""
+        """执行 LLM-Tool 循环。
+
+        Parameters
+        ----------
+        on_message:
+            Optional callback invoked with each intermediate message
+            (assistant tool_calls and tool responses) as soon as it is
+            produced, enabling immediate persistence to disk.
+        """
         total_usage = TokenUsage()
         working_messages = list(messages)
-        intermediate: list[dict[str, Any]] = []
 
         for iteration in range(self._max_iterations):
             response: LLMResponse = await llm.complete(working_messages, tools)
@@ -68,20 +75,22 @@ class ExecutionEngine:
                 return EngineResult(
                     text=response.content or "",
                     usage=total_usage,
-                    intermediate_messages=intermediate,
                     thinking=response.thinking,
                 )
 
             assistant_msg = self._build_assistant_message(response)
             working_messages.append(assistant_msg)
-            intermediate.append(assistant_msg)
+            if on_message:
+                on_message(assistant_msg)
 
             for tc in response.tool_calls:
                 logger.info("Tool call [%d]: %s(%s)", iteration + 1, tc.name, tc.arguments[:100])
 
             tool_msgs = await self._execute_tools(response, chat_id)
             working_messages.extend(tool_msgs)
-            intermediate.extend(tool_msgs)
+            for tm in tool_msgs:
+                if on_message:
+                    on_message(tm)
 
         logger.warning("Tool loop reached max iterations (%d)", self._max_iterations)
         final = await llm.complete(working_messages, tools=None)
@@ -90,7 +99,6 @@ class ExecutionEngine:
         return EngineResult(
             text=final.content or "",
             usage=total_usage,
-            intermediate_messages=intermediate,
             thinking=final.thinking,
         )
 
@@ -108,11 +116,14 @@ class ExecutionEngine:
             }
             for tc in response.tool_calls
         ]
-        return {
+        msg: dict[str, Any] = {
             "role": "assistant",
             "content": response.content,
             "tool_calls": raw_tool_calls,
         }
+        if response.thinking:
+            msg["reasoning_content"] = response.thinking
+        return msg
 
     async def _execute_tools(
         self,

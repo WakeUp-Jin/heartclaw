@@ -59,18 +59,19 @@ class Agent:
         )
         self._ctx.append_item(user_item)
 
+        self._ctx.short_term_memory.mark_turn_start()
+
         messages = self._ctx.get_context()
         tools = self._tool_manager.get_formatted_tools()
         llm = self._registry.get_high()
 
-        result = await self._engine.run(llm, messages, tools, chat_id=chat_id)
+        result = await self._engine.run(
+            llm, messages, tools,
+            chat_id=chat_id,
+            on_message=lambda msg: self._ctx.append_message(msg),
+        )
 
         self._token_counter.add(result.usage.prompt_tokens, result.usage.completion_tokens)
-
-        for msg in result.intermediate_messages:
-            self._ctx.append_message(msg)
-
-        self._ctx.archive_tool_context()
 
         model_cfg = settings.get_model_config("high")
         cost = model_cfg.calc_cost(result.usage)

@@ -76,7 +76,7 @@ class ContextItem:
     tool_call_id: str | None = None
     name: str | None = None
 
-    # thinking (model reasoning chain, not sent to LLM)
+    # thinking (model reasoning chain, must be echoed back when present)
     thinking: str | None = None
     thinking_token_estimate: int = 0
 
@@ -88,7 +88,12 @@ class ContextItem:
     # ------------------------------------------------------------------
 
     def to_message(self) -> dict[str, Any]:
-        """Convert to OpenAI chat message dict format."""
+        """Convert to OpenAI chat message dict format.
+
+        When the model has thinking enabled, ``reasoning_content`` must be
+        echoed back in assistant messages that contain tool_calls, otherwise
+        the API will reject the request with a 400 error.
+        """
         msg: dict[str, Any] = {"role": self.role}
 
         if self.content is not None:
@@ -102,6 +107,9 @@ class ContextItem:
 
         if self.name is not None:
             msg["name"] = self.name
+
+        if self.thinking is not None:
+            msg["reasoning_content"] = self.thinking
 
         return msg
 

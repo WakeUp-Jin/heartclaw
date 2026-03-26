@@ -18,7 +18,6 @@ from core.context.manager import ContextManager
 from core.context.types import CompressionConfig
 from core.context.modules.system_prompt import SystemPromptContext
 from core.context.modules.short_term_memory import ShortTermMemoryContext
-from core.context.modules.tool_context import ToolContext
 from core.context.utils.compressor import ContextCompressor
 from core.tool.manager import ToolManager
 from core.tool.scheduler import ToolScheduler, ToolSchedulerConfig
@@ -40,7 +39,6 @@ def _build_agent() -> Agent:
     compressor = ContextCompressor()
     short_term = ShortTermMemoryContext(storage=short_memory_storage, compressor=compressor)
     system_prompt = SystemPromptContext()
-    tool_context = ToolContext()
 
     high_model = settings.get_model_config("high")
     compression_config = CompressionConfig(
@@ -52,7 +50,6 @@ def _build_agent() -> Agent:
     context_manager = ContextManager(
         system_prompt=system_prompt,
         short_term_memory=short_term,
-        tool_context=tool_context,
         compression_config=compression_config,
     )
 

@@ -76,13 +76,16 @@ class KimiService(BaseLLMService):
                 cached_tokens=cached,
             )
 
+        thinking: str | None = getattr(message, "reasoning_content", None) or None
+
         finish_reason = choice.finish_reason or "stop"
 
         logger.debug(
-            "Kimi response: content_len=%s, tool_calls=%d, tokens=%d, finish=%s",
+            "Kimi response: content_len=%s, tool_calls=%d, tokens=%d, thinking=%s, finish=%s",
             len(message.content) if message.content else 0,
             len(tool_calls),
             usage.total_tokens,
+            len(thinking) if thinking else 0,
             finish_reason,
         )
 
@@ -91,4 +94,5 @@ class KimiService(BaseLLMService):
             tool_calls=tool_calls,
             usage=usage,
             finish_reason=finish_reason,
+            thinking=thinking,
         )
