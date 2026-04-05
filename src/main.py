@@ -7,7 +7,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-from config.settings import settings, get_pineclaw_home
+from config.settings import settings, get_heartclaw_home
 from utils.logger import logger, set_log_level
 
 from core.llm.registry import LLMServiceRegistry
@@ -40,7 +40,7 @@ _memory_scheduler: MemoryUpdateScheduler | None = None
 
 async def startup() -> None:
     global _memory_scheduler
-    logger.info("=== PineClaw starting ===")
+    logger.info("=== HeartClaw starting ===")
 
     set_log_level(settings.log_level)
 
@@ -125,7 +125,7 @@ async def startup() -> None:
     await _memory_scheduler.start()
 
     # 9. Clean up old memory directory (migrated to skills/memory/)
-    old_memory_dir = get_pineclaw_home() / "memory"
+    old_memory_dir = get_heartclaw_home() / "memory"
     if old_memory_dir.is_dir():
         try:
             shutil.rmtree(old_memory_dir)
@@ -133,32 +133,34 @@ async def startup() -> None:
         except Exception as e:
             logger.warning("Failed to remove legacy memory dir: %s", e)
 
-    # 10. Feishu Channel
-    async def on_message(text: str, chat_id: str, open_id: str) -> str:
-        return await agent.run(text, chat_id, open_id)
+    # 10. Channel (controlled by HEARTCLAW_CHANNEL_MODE)
+    if settings.channel_mode == "feishu":
+        async def on_message(text: str, chat_id: str, open_id: str) -> str:
+            return await agent.run(text, chat_id, open_id)
 
-    channel = FeishuChannel(
-        app_id=settings.feishu_app_id,
-        app_secret=settings.feishu_app_secret,
-        on_message=on_message,
-    )
-    await channel.connect()
-    register_channel(channel)
-    logger.info("FeishuChannel connected (p2p single-chat)")
+        channel = FeishuChannel(
+            app_id=settings.feishu_app_id,
+            app_secret=settings.feishu_app_secret,
+            on_message=on_message,
+        )
+        await channel.connect()
+        register_channel(channel)
+        logger.info("FeishuChannel connected (p2p single-chat)")
 
-    # 11. Inject send_card callback into Scheduler
-    async def send_card(chat_id: str, card_json: str) -> None:
-        await channel.send_message(chat_id, card_json, msg_type="interactive")
+        async def send_card(chat_id: str, card_json: str) -> None:
+            await channel.send_message(chat_id, card_json, msg_type="interactive")
 
-    scheduler._send_card = send_card
-    logger.info("Scheduler send_card callback attached")
+        scheduler._send_card = send_card
+        logger.info("Scheduler send_card callback attached")
+    else:
+        logger.info("Channel mode = %s, skipping Feishu (API-only mode)", settings.channel_mode)
 
-    logger.info("=== PineClaw ready ===")
+    logger.info("=== HeartClaw ready ===")
 
 
 async def shutdown() -> None:
     global _memory_scheduler
-    logger.info("=== PineClaw shutting down ===")
+    logger.info("=== HeartClaw shutting down ===")
 
     if _memory_scheduler:
         await _memory_scheduler.stop()
@@ -171,7 +173,7 @@ async def shutdown() -> None:
         except Exception:
             logger.error("Failed to disconnect channel: %s", name, exc_info=True)
 
-    logger.info("=== PineClaw stopped ===")
+    logger.info("=== HeartClaw stopped ===")
 
 
 def main() -> None:

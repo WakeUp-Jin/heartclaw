@@ -1,14 +1,14 @@
 {
   "app": {
     "log_level": "INFO",
-    "sqlite_db_path": "./data/pineclaw.db"
+    "sqlite_db_path": "./data/heartclaw.db"
   },
   "feishu": {
     "app_id": "${FEISHU_APP_ID}",
     "app_secret": "${FEISHU_APP_SECRET}",
     "verification_token": "${FEISHU_VERIFICATION_TOKEN}",
     "encrypt_key": "${FEISHU_ENCRYPT_KEY}",
-    "memory_folder_name": "PineClaw"
+    "memory_folder_name": "HeartClaw"
   },
   "llm": {
     "models": {

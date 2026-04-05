@@ -2,7 +2,7 @@
 
 File layout::
 
-    ~/.pineclaw/skills/memory/short_term/
+    ~/.heartclaw/skills/memory/short_term/
         state.json
         2026-03/
             2026-03-29.jsonl          <- today's raw ContextItem dicts

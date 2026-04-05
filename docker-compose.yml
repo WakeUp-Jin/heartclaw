@@ -1,16 +1,19 @@
 services:
-  pineclaw:
-    build: .
-    container_name: pineclaw
+  heartclaw:
+    build:
+      context: .
+      dockerfile: docker/heartclaw.Dockerfile
+    container_name: heartclaw
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - .env
+      - docker/env/heartclaw.env
     environment:
-      - PINECLAW_HOME=/root/.pineclaw
+      - HEARTCLAW_HOME=/root/.heartclaw
     volumes:
-      - pineclaw-shared:/root/.pineclaw
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}:/root/.heartclaw
 
   tiangong:
     build:
@@ -20,13 +23,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - docker/env/tiangong.env
     volumes:
-      - pineclaw-shared:/shared
-
-volumes:
-  pineclaw-shared:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${HOME}/.pineclaw
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}:/shared
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/codex:/root/.codex

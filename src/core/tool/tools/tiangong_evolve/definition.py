@@ -33,6 +33,27 @@ TianGongEvolveTool = InternalTool(
                     "不传则自动从 task 推导"
                 ),
             },
+            "target_os": {
+                "type": "string",
+                "description": (
+                    "可选：目标运行系统（如 linux / macos / windows）。"
+                    "不传则默认使用如意当前运行系统"
+                ),
+            },
+            "target_arch": {
+                "type": "string",
+                "description": (
+                    "可选：目标运行架构（如 x86_64 / aarch64）。"
+                    "不传则默认使用如意当前运行架构"
+                ),
+            },
+            "target_env_note": {
+                "type": "string",
+                "description": (
+                    "可选：目标环境补充说明（例如"
+                    "“最终运行在用户本机 macOS M 系列”）"
+                ),
+            },
         },
         required=["task"],
     ),

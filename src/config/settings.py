@@ -17,18 +17,18 @@ _DEFAULT_ENV_PATH = _PROJECT_ROOT / ".env"
 
 
 # ------------------------------------------------------------------
-# .pineclaw home directory
+# .heartclaw home directory
 # ------------------------------------------------------------------
 
-def get_pineclaw_home() -> Path:
-    """Return the .pineclaw directory path.
+def get_heartclaw_home() -> Path:
+    """Return the .heartclaw directory path.
 
-    Priority: $PINECLAW_HOME env var > ~/.pineclaw
+    Priority: $HEARTCLAW_HOME env var > ~/.heartclaw
     """
-    env = os.environ.get("PINECLAW_HOME")
+    env = os.environ.get("HEARTCLAW_HOME")
     if env:
         return Path(env)
-    return Path.home() / ".pineclaw"
+    return Path.home() / ".heartclaw"
 
 
 _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
@@ -105,12 +105,12 @@ _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
 }
 
 
-def ensure_pineclaw_dirs() -> Path:
-    """Create the ~/.pineclaw directory tree if it does not exist.
+def ensure_heartclaw_dirs() -> Path:
+    """Create the ~/.heartclaw directory tree if it does not exist.
 
-    Returns the pineclaw home path.  Safe to call multiple times.
+    Returns the heartclaw home path.  Safe to call multiple times.
     """
-    home = get_pineclaw_home()
+    home = get_heartclaw_home()
 
     dirs = [
         home,
@@ -124,6 +124,7 @@ def ensure_pineclaw_dirs() -> Path:
         home / "tiangong" / "orders" / "pending",
         home / "tiangong" / "orders" / "processing",
         home / "tiangong" / "orders" / "done",
+        home / "tiangong" / "codex",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -264,11 +265,12 @@ class TianGongConfig:
 @dataclass
 class AppSection:
     log_level: str = "INFO"
+    channel_mode: str = ""
 
 
 @dataclass
 class AppConfig:
-    """Global configuration loaded from ~/.pineclaw/config.json + .env."""
+    """Global configuration loaded from ~/.heartclaw/config.json + .env."""
 
     app: AppSection = field(default_factory=AppSection)
     models: dict[str, ModelConfig] = field(default_factory=dict)
@@ -301,15 +303,15 @@ class AppConfig:
 
     @property
     def short_term_dir(self) -> Path:
-        return get_pineclaw_home() / "skills" / "memory" / "short_term"
+        return get_heartclaw_home() / "skills" / "memory" / "short_term"
 
     @property
     def long_term_dir(self) -> Path:
-        return get_pineclaw_home() / "skills" / "memory" / "long_term"
+        return get_heartclaw_home() / "skills" / "memory" / "long_term"
 
     @property
     def update_log_dir(self) -> Path:
-        return get_pineclaw_home() / "skills" / "memory" / "update_logs"
+        return get_heartclaw_home() / "skills" / "memory" / "update_logs"
 
     @property
     def memory_update_schedule(self) -> str:
@@ -318,6 +320,10 @@ class AppConfig:
     @property
     def initial_load_ratio(self) -> float:
         return self.memory.short_term.initial_load_ratio
+
+    @property
+    def channel_mode(self) -> str:
+        return self.app.channel_mode
 
     @property
     def compression_threshold(self) -> float:
@@ -375,14 +381,15 @@ def load_config(
     config_path: Path | str | None = None,
     env_path: Path | str | None = None,
 ) -> AppConfig:
-    """Load config from ~/.pineclaw/config.json + .env.
+    """Load config from ~/.heartclaw/config.json + .env.
 
-    1. Ensure ~/.pineclaw/ directory tree exists (create if missing)
+    1. Ensure ~/.heartclaw/ directory tree exists (create if missing)
     2. Load .env into environment
     3. Read config.json and resolve ${VAR} placeholders
     4. Build typed AppConfig
+    5. Override channel_mode from $HEARTCLAW_CHANNEL_MODE if set
     """
-    home = ensure_pineclaw_dirs()
+    home = ensure_heartclaw_dirs()
 
     env_path = Path(env_path) if env_path else _DEFAULT_ENV_PATH
     config_path = Path(config_path) if config_path else (home / "config.json")
@@ -396,7 +403,15 @@ def load_config(
         raw = json.load(f)
 
     resolved = _resolve_env_vars(raw)
-    return _build_config(resolved)
+    cfg = _build_config(resolved)
+
+    channel_env = os.environ.get("HEARTCLAW_CHANNEL_MODE", "").strip().lower()
+    if channel_env:
+        cfg.app.channel_mode = channel_env
+    elif not cfg.app.channel_mode:
+        cfg.app.channel_mode = "none"
+
+    return cfg
 
 
 settings = load_config()

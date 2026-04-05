@@ -4,7 +4,7 @@ import logging
 import sys
 import os
 
-_ROOT_LOGGER_NAME = "pineclaw"
+_ROOT_LOGGER_NAME = "heartclaw"
 _LOG_FORMAT = "[%(asctime)s] %(levelname)s %(name)s - %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _initialized = False
@@ -36,9 +36,9 @@ def _ensure_root_logger() -> None:
 def get_logger(name: str | None = None) -> logging.Logger:
     """获取模块级 logger。
 
-    - get_logger()          → pineclaw
-    - get_logger("llm")     → pineclaw.llm
-    - get_logger("llm.kimi") → pineclaw.llm.kimi
+    - get_logger()          → heartclaw
+    - get_logger("llm")     → heartclaw.llm
+    - get_logger("llm.kimi") → heartclaw.llm.kimi
     """
     _ensure_root_logger()
     if name:

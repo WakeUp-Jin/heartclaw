@@ -72,7 +72,7 @@ def _build_agent() -> Agent:
 
 
 async def _repl(agent: Agent) -> None:
-    print("\n🌲 PineClaw CLI (输入 /quit 退出, /clear 清空对话)\n")
+    print("\n💚 HeartClaw CLI (输入 /quit 退出, /clear 清空对话)\n")
 
     while True:
         try:

@@ -44,7 +44,7 @@ def _resolve_env_vars(obj):
 def load_config(shared_dir: str | None = None) -> dict:
     """从共享卷的 config.json 读取天工配置。
 
-    配置统一在 ~/.pineclaw/config.json 中管理，天工只取 "tiangong" 部分。
+    配置统一在 ~/.heartclaw/config.json 中管理，天工只取 "tiangong" 部分。
     API Key 等敏感信息使用 ${VAR} 占位符，运行时从环境变量解析。
     """
     shared = Path(shared_dir or DEFAULT_SHARED_DIR)

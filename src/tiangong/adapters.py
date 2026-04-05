@@ -19,7 +19,7 @@ import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger("tiangong.adapters")
 
@@ -111,10 +111,40 @@ class CodingAgentAdapter(ABC):
             logger.error("%s (cwd=%s)", error, cwd)
             return 127, "", error
 
-        stdout, stderr = await proc.communicate()
+        stdout_task = asyncio.create_task(
+            self._read_stream(proc.stdout, "stdout", logger.info)
+        )
+        stderr_task = asyncio.create_task(
+            self._read_stream(proc.stderr, "stderr", logger.warning)
+        )
+        await proc.wait()
+        stdout = await stdout_task
+        stderr = await stderr_task
         code = proc.returncode or 0
         logger.info("Process exited with code %d", code)
-        return code, stdout.decode(), stderr.decode()
+        return code, stdout, stderr
+
+    async def _read_stream(
+        self,
+        stream: asyncio.StreamReader | None,
+        stream_name: str,
+        log_fn: Callable[..., None],
+    ) -> str:
+        """逐行读取子进程输出并实时写入日志。"""
+        if stream is None:
+            return ""
+
+        chunks: list[bytes] = []
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            chunks.append(line)
+            text = line.decode(errors="replace").rstrip()
+            if text:
+                log_fn("[%s][%s] %s", self.agent_type, stream_name, text)
+
+        return b"".join(chunks).decode(errors="replace")
 
 
 class ClaudeCodeAdapter(CodingAgentAdapter):
@@ -167,7 +197,7 @@ class CodexAdapter(CodingAgentAdapter):
 
     文档: https://developers.openai.com/codex/cli/reference/
     非交互模式: codex exec "prompt"
-    选项: --full-auto --json
+    选项: --dangerously-bypass-approvals-and-sandbox --json
     session 恢复: codex exec resume --last "follow-up"
     """
 
@@ -180,18 +210,91 @@ class CodexAdapter(CodingAgentAdapter):
 
     async def run(self, prompt: str) -> AgentResult:
         code, stdout, stderr = await self._exec(
-            ["codex", "exec", "--full-auto", "--json", prompt],
+            [
+                "codex",
+                "exec",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--json",
+                prompt,
+            ],
             cwd=self.cwd,
         )
-        if code == 0:
-            return AgentResult(success=True, output=stdout)
-        return AgentResult(success=False, error=stderr or stdout)
+        return self._parse_result(code, stdout, stderr)
 
     async def resume(self, message: str) -> AgentResult:
         code, stdout, stderr = await self._exec(
-            ["codex", "exec", "resume", "--last", message],
+            [
+                "codex",
+                "exec",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--json",
+                "resume",
+                "--last",
+                message,
+            ],
             cwd=self.cwd,
         )
-        if code == 0:
-            return AgentResult(success=True, output=stdout)
-        return AgentResult(success=False, error=stderr or stdout)
+        return self._parse_result(code, stdout, stderr)
+
+    @classmethod
+    def _parse_result(cls, code: int, stdout: str, stderr: str) -> AgentResult:
+        if code != 0:
+            return AgentResult(success=False, error=stderr or stdout)
+
+        failed_items, has_successful_file_change = cls._inspect_json_events(stdout)
+        if failed_items and not has_successful_file_change:
+            return AgentResult(
+                success=False,
+                output=stdout,
+                error=cls._summarize_failed_items(failed_items),
+            )
+        return AgentResult(success=True, output=stdout)
+
+    @staticmethod
+    def _inspect_json_events(stdout: str) -> tuple[list[dict], bool]:
+        failed_items: list[dict] = []
+        has_successful_file_change = False
+
+        for line in stdout.splitlines():
+            text = line.strip()
+            if not text or not text.startswith("{"):
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+
+            if event.get("type") != "item.completed":
+                continue
+
+            item = event.get("item")
+            if not isinstance(item, dict):
+                continue
+
+            item_type = item.get("type")
+            status = item.get("status")
+
+            if item_type == "file_change" and status == "completed":
+                has_successful_file_change = True
+            if item_type in {"command_execution", "file_change"} and status == "failed":
+                failed_items.append(item)
+
+        return failed_items, has_successful_file_change
+
+    @staticmethod
+    def _summarize_failed_items(failed_items: list[dict]) -> str:
+        first = failed_items[0]
+        item_type = first.get("type", "unknown")
+        command = first.get("command", "")
+        exit_code = first.get("exit_code")
+        output = (first.get("aggregated_output") or "").strip().replace("\n", " ")
+
+        parts = [f"codex item failed: type={item_type}"]
+        if command:
+            parts.append(f"command={command}")
+        if exit_code is not None:
+            parts.append(f"exit_code={exit_code}")
+        if output:
+            parts.append(f"output={output[:300]}")
+
+        return ", ".join(parts)

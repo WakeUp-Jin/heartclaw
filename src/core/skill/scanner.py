@@ -23,8 +23,8 @@ from utils.logger import get_logger
 logger = get_logger("skill.scanner")
 
 # 扫描的子目录名（按优先级排列，项目级在前，用户级在后）
-_PROJECT_SKILL_DIRS = [".pineclaw/skills", ".agents/skills", ".claude/skills"]
-_USER_SKILL_DIRS = [".pineclaw/skills", ".agents/skills", ".claude/skills"]
+_PROJECT_SKILL_DIRS = [".heartclaw/skills", ".agents/skills", ".claude/skills"]
+_USER_SKILL_DIRS = [".heartclaw/skills", ".agents/skills", ".claude/skills"]
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
 
@@ -38,10 +38,10 @@ def scan_skills(project_root: Path) -> list[SkillMeta]:
     """扫描项目级和用户级目录，返回去重后的 SkillMeta 列表。
 
     扫描顺序（优先级从高到低）：
-      1. <project>/.pineclaw/skills/
+      1. <project>/.heartclaw/skills/
       2. <project>/.agents/skills/
       3. <project>/.claude/skills/
-      4. ~/.pineclaw/skills/
+      4. ~/.heartclaw/skills/
       5. ~/.agents/skills/
       6. ~/.claude/skills/
 

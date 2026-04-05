@@ -188,6 +188,39 @@ wheels = [
 ]
 
 [[package]]
+name = "heartclaw"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "apscheduler" },
+    { name = "fastapi" },
+    { name = "lark-oapi" },
+    { name = "openai" },
+    { name = "pyyaml" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "basedpyright" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite" },
+    { name = "apscheduler", specifier = ">=3.10" },
+    { name = "fastapi" },
+    { name = "lark-oapi", specifier = ">=1.5.3" },
+    { name = "openai" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "uvicorn", extras = ["standard"] },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "basedpyright", specifier = ">=1.38.2" }]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -370,39 +403,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d7/91/2a06c4e9597c338ca
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/2e/3f73e8ca53718952222cacd0cf7eecc9db439d020f0c1fe7ae717e4e199a/openai-2.26.0-py3-none-any.whl", hash = "sha256:6151bf8f83802f036117f06cc8a57b3a4da60da9926826cc96747888b57f394f", size = 1136409, upload-time = "2026-03-05T23:17:34.072Z" },
 ]
-
-[[package]]
-name = "pineclaw"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiosqlite" },
-    { name = "apscheduler" },
-    { name = "fastapi" },
-    { name = "lark-oapi" },
-    { name = "openai" },
-    { name = "pyyaml" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "basedpyright" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite" },
-    { name = "apscheduler", specifier = ">=3.10" },
-    { name = "fastapi" },
-    { name = "lark-oapi", specifier = ">=1.5.3" },
-    { name = "openai" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "uvicorn", extras = ["standard"] },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "basedpyright", specifier = ">=1.38.2" }]
 
 [[package]]
 name = "pycryptodome"

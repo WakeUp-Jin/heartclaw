@@ -16,7 +16,7 @@ from core.context.base import BaseContext
 from core.context.types import PromptSegment, ContextParts, SystemPart
 
 DEFAULT_SYSTEM_PROMPT = """\
-你是 PineClaw，一个AI 助手。你可以帮助用户：
+你是 HeartClaw，一个AI 助手。你可以帮助用户：
 
 - 创建、读取、修改飞书文档
 - 创建和操作多维表格（Bitable）

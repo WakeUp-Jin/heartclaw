@@ -8,7 +8,7 @@ from api.routes import health, chat, webhook, card_callback
 
 def create_app(*, lifespan: Any = None) -> FastAPI:
     app = FastAPI(
-        title="PineClaw",
+        title="HeartClaw",
         description="Lightweight AI Agent with Feishu as collaborative space",
         version="0.1.0",
         lifespan=lifespan,

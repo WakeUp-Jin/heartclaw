@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +27,7 @@ class TianGongEngine:
     ----------
     config : dict
         必须包含:
-        - shared_dir: 共享卷在容器内的路径（映射到宿主机 .pineclaw/）
+        - shared_dir: 共享卷在容器内的路径（映射到宿主机 .heartclaw/）
         - workspace_dir: Rust 工作空间路径
         - poll_interval: 巡查间隔秒数（默认 900 = 15分钟）
         - agent: Coding Agent 适配器配置（含 type 字段）
@@ -93,8 +95,15 @@ class TianGongEngine:
         forge_spec = ""
         if self.forge_spec_path.is_file():
             forge_spec = self.forge_spec_path.read_text(encoding="utf-8")
+        runtime_env = self._build_runtime_env_prompt()
 
-        prompt = f"{forge_spec}\n\n---\n\n# 本次锻造令\n\n{order_content}"
+        prompt = (
+            f"{forge_spec}\n\n"
+            f"{runtime_env}\n\n"
+            f"---\n\n"
+            f"# 本次锻造令\n\n"
+            f"{order_content}"
+        )
 
         result = await self.agent.run(prompt)
 
@@ -139,3 +148,38 @@ class TianGongEngine:
         """确保 orders 子目录存在。"""
         for sub in ("pending", "processing", "done"):
             (self.orders_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    def _build_runtime_env_prompt(self) -> str:
+        """构建注入到 Prompt 的天工执行环境说明。"""
+        cargo_ver = self._probe_version(["cargo", "--version"])
+        rustc_ver = self._probe_version(["rustc", "--version"])
+        return (
+            "## 天工执行环境（自动注入）\n\n"
+            f"- 操作系统：{platform.system().lower()}\n"
+            f"- 架构：{platform.machine().lower()}\n"
+            f"- 工作空间目录：{self.workspace}\n"
+            f"- 共享目录：{self.shared_dir}\n"
+            f"- cargo 版本：{cargo_ver}\n"
+            f"- rustc 版本：{rustc_ver}\n"
+        )
+
+    @staticmethod
+    def _probe_version(cmd: list[str]) -> str:
+        """探测命令版本，失败时返回可读提示。"""
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except FileNotFoundError:
+            return "not found"
+        except Exception as exc:  # pragma: no cover - 防御性分支
+            return f"error: {exc}"
+
+        output = (proc.stdout or proc.stderr).strip()
+        if output:
+            return output.splitlines()[0]
+        return f"exit_code={proc.returncode}"
