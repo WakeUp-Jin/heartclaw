@@ -15,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("tiangong.adapters")
@@ -35,6 +37,10 @@ class AgentResult:
 class CodingAgentAdapter(ABC):
     """Coding Agent CLI 适配器基类。"""
 
+    def __init__(self, config: dict) -> None:
+        self.cwd: str = config["workspace_dir"]
+        self.agent_type: str = config["type"]
+
     @abstractmethod
     async def run(self, prompt: str) -> AgentResult:
         """首次执行任务。"""
@@ -42,6 +48,11 @@ class CodingAgentAdapter(ABC):
     @abstractmethod
     async def resume(self, message: str) -> AgentResult:
         """恢复 session 继续执行（多轮交互场景）。"""
+
+    @property
+    @abstractmethod
+    def command_name(self) -> str:
+        """CLI 命令名。"""
 
     @staticmethod
     def create(config: dict) -> CodingAgentAdapter:
@@ -59,15 +70,47 @@ class CodingAgentAdapter(ABC):
             )
         return cls(config)
 
+    def validate_environment(self) -> None:
+        """启动时校验工作目录和 CLI 是否可用。"""
+        cwd_path = Path(self.cwd)
+        if not cwd_path.exists():
+            raise RuntimeError(
+                f"selected agent={self.agent_type} but workspace does not exist: "
+                f"{self.cwd}"
+            )
+
+        binary_path = shutil.which(self.command_name)
+        if not binary_path:
+            raise RuntimeError(
+                f"selected agent={self.agent_type} but binary "
+                f"`{self.command_name}` was not found in PATH"
+            )
+
+        logger.info(
+            "Agent runtime validated: agent=%s, binary=%s, cwd=%s",
+            self.agent_type,
+            binary_path,
+            self.cwd,
+        )
+
     async def _exec(self, cmd: list[str], cwd: str) -> tuple[int, str, str]:
         """通用子进程执行。返回 (exit_code, stdout, stderr)。"""
-        logger.info("Executing: %s (cwd=%s)", " ".join(cmd[:3]) + "...", cwd)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        logger.info("Executing agent command: %s (cwd=%s)", " ".join(cmd[:4]), cwd)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            error = (
+                f"Agent CLI `{cmd[0]}` not found in PATH. "
+                f"selected agent={self.agent_type}"
+            )
+            logger.error("%s (cwd=%s)", error, cwd)
+            return 127, "", error
+
         stdout, stderr = await proc.communicate()
         code = proc.returncode or 0
         logger.info("Process exited with code %d", code)
@@ -84,7 +127,11 @@ class ClaudeCodeAdapter(CodingAgentAdapter):
     """
 
     def __init__(self, config: dict) -> None:
-        self.cwd: str = config["workspace_dir"]
+        super().__init__(config)
+
+    @property
+    def command_name(self) -> str:
+        return "claude"
 
     async def run(self, prompt: str) -> AgentResult:
         code, stdout, stderr = await self._exec(
@@ -125,7 +172,11 @@ class CodexAdapter(CodingAgentAdapter):
     """
 
     def __init__(self, config: dict) -> None:
-        self.cwd: str = config["workspace_dir"]
+        super().__init__(config)
+
+    @property
+    def command_name(self) -> str:
+        return "codex"
 
     async def run(self, prompt: str) -> AgentResult:
         code, stdout, stderr = await self._exec(

@@ -3,7 +3,7 @@
 # 包含：Rust 工具链（预热常用 crate）+ Node.js + Python
 # 运行：天工调度器（巡查锻造令 → 调度 Coding Agent CLI）
 
-FROM rust:1.82-slim AS base
+FROM rust:1.85-slim AS base
 
 # ── 基础工具 ──────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,12 +22,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Coding Agent CLI（按需取消注释） ─────────────
-# Claude Code:
-# RUN npm install -g @anthropic-ai/claude-code
-#
-# Codex (OpenAI):
-# RUN npm install -g @openai/codex
+# ── Coding Agent CLI（方案 A：仅安装 Codex） ─────
+RUN npm install -g @openai/codex \
+    && codex --version
 
 # ── 预热 Rust 常用 crate ────────────────────────
 # 创建临时项目，添加常用依赖并编译一次。
@@ -36,7 +33,6 @@ WORKDIR /tmp/warmup
 RUN cargo init --name warmup && \
     cat >> Cargo.toml <<'TOML'
 
-[dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

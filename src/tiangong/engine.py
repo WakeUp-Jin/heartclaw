@@ -41,11 +41,23 @@ class TianGongEngine:
 
         self.agent = CodingAgentAdapter.create(config["agent"])
 
+    def validate_runtime(self) -> None:
+        """启动前做一次运行环境自检。"""
+        self._ensure_dirs()
+        logger.info(
+            "Validating TianGong runtime: agent=%s, workspace=%s, shared_dir=%s",
+            self.agent.agent_type,
+            self.workspace,
+            self.shared_dir,
+        )
+        self.agent.validate_environment()
+
     async def run(self) -> None:
         """主循环：定时巡查。"""
         self._ensure_dirs()
         logger.info(
-            "TianGong engine started. poll_interval=%ds, orders=%s",
+            "TianGong engine started. agent=%s, poll_interval=%ds, orders=%s",
+            self.agent.agent_type,
             self.poll_interval,
             self.orders_dir,
         )
@@ -68,7 +80,12 @@ class TianGongEngine:
 
     async def _forge(self, order_file: Path) -> None:
         """处理一个锻造令：移到 processing → 调 Agent → 归档。"""
-        logger.info("Processing order: %s", order_file.name)
+        logger.info(
+            "Processing order: %s (agent=%s, workspace=%s)",
+            order_file.name,
+            self.agent.agent_type,
+            self.workspace,
+        )
 
         proc_file = self._move_order(order_file, "processing")
         order_content = proc_file.read_text(encoding="utf-8")

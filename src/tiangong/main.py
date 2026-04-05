@@ -86,6 +86,7 @@ def load_config(shared_dir: str | None = None) -> dict:
 async def main() -> None:
     config = load_config()
     engine = TianGongEngine(config)
+    engine.validate_runtime()
     await engine.run()
 
 
