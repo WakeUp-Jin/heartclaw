@@ -13,6 +13,7 @@ from core.tool.tools.tiangong_feedback import TianGongFeedbackTool
 from core.tool.tools.cron_create import CronCreateTool
 from core.tool.tools.cron_list import CronListTool
 from core.tool.tools.cron_delete import CronDeleteTool
+from core.tool.tools.write_file import WriteFileTool
 from utils.logger import get_logger
 from utils.token_counter import TokenCounter
 
@@ -130,6 +131,7 @@ class Agent:
         self._tool_manager.register(CronCreateTool)
         self._tool_manager.register(CronListTool)
         self._tool_manager.register(CronDeleteTool)
+        self._tool_manager.register(WriteFileTool)
         logger.info("Built-in tools registered: %s", self._tool_manager.list_tools())
 
     def _handle_clear(self) -> str:

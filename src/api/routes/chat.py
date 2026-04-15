@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from core.agent.context_vars import current_chat_id
+from core.queue.types import QueueMessage, MessagePriority
+
+if TYPE_CHECKING:
+    from core.queue.message_queue import MessageQueue
 
 router = APIRouter()
 
 _agent_ref: Any = None
-_agent_lock: asyncio.Lock | None = None
+_queue_ref: MessageQueue | None = None
 
 
 def set_agent(agent: Any) -> None:
@@ -19,9 +22,9 @@ def set_agent(agent: Any) -> None:
     _agent_ref = agent
 
 
-def set_agent_lock(lock: asyncio.Lock) -> None:
-    global _agent_lock
-    _agent_lock = lock
+def set_message_queue(queue: MessageQueue) -> None:
+    global _queue_ref
+    _queue_ref = queue
 
 
 class ChatRequest(BaseModel):
@@ -39,12 +42,20 @@ async def chat(req: ChatRequest):
     if _agent_ref is None:
         return ChatResponse(reply="Agent not initialized")
 
-    if _agent_lock:
-        async with _agent_lock:
-            current_chat_id.set(req.chat_id)
-            reply = await _agent_ref.run(req.text, req.chat_id, req.open_id)
+    current_chat_id.set(req.chat_id)
+
+    if _queue_ref is not None:
+        msg = QueueMessage(
+            priority=MessagePriority.USER,
+            mode="user",
+            content=req.text,
+            chat_id=req.chat_id,
+            open_id=req.open_id,
+            source_channel="api",
+        )
+        future = await _queue_ref.enqueue(msg)
+        reply = await future
     else:
-        current_chat_id.set(req.chat_id)
         reply = await _agent_ref.run(req.text, req.chat_id, req.open_id)
 
     return ChatResponse(reply=reply)

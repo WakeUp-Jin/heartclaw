@@ -6,7 +6,7 @@ import json
 from typing import Any, TYPE_CHECKING
 
 from storage.memory_store import VALID_FILES
-from core.tool.edit_memory_tool import edit_memory_def, edit_memory_handler
+from core.tool.tools.memory.edit_memory_tool import edit_memory_def, edit_memory_handler
 
 if TYPE_CHECKING:
     from storage.memory_store import LocalMemoryStore

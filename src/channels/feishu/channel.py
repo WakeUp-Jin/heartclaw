@@ -26,7 +26,7 @@ class FeishuChannel:
         self,
         app_id: str,
         app_secret: str,
-        on_message: Callable[[str, str, str], Awaitable[str]] | None = None,
+        on_message: Callable[[str, str, str], Awaitable[None]] | None = None,
     ):
         self._app_id = app_id
         self._app_secret = app_secret
@@ -46,7 +46,7 @@ class FeishuChannel:
         self._ws_start_error: Exception | None = None
         self._stopping = threading.Event()
 
-    def set_on_message(self, handler: Callable[[str, str, str], Awaitable[str]]) -> None:
+    def set_on_message(self, handler: Callable[[str, str, str], Awaitable[None]]) -> None:
         self._on_message = handler
 
     async def connect(self) -> None:
@@ -128,6 +128,7 @@ class FeishuChannel:
             future.add_done_callback(self._on_future_done)
 
     async def _process_message(self, parsed: dict[str, Any]) -> None:
+        """将飞书消息交给 on_message 回调（入队），回复由 ReplyDispatcher 统一发送。"""
         if not self._on_message:
             return
 
@@ -136,9 +137,7 @@ class FeishuChannel:
         open_id = parsed["open_id"]
 
         try:
-            reply = await self._on_message(text, chat_id, open_id)
-            if reply:
-                await self.send_message(chat_id, reply)
+            await self._on_message(text, chat_id, open_id)
         except Exception as e:
             logger.error("Error processing message: %s", e, exc_info=True)
             try:

@@ -1,6 +1,6 @@
 """定时任务调度器。
 
-每秒扫描 scheduled_tasks.json，到期的任务加锁后调用 Agent.run() 执行。
+每秒扫描 scheduled_tasks.json，到期的任务通过消息队列入队执行。
 循环任务从当前时间重新计算下次触发；一次性任务触发后自动删除。
 """
 
@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from core.agent.context_vars import current_chat_id
+from core.queue.types import QueueMessage, MessagePriority
 from scheduler.cron_parser import cron_to_human, next_cron_time
 from scheduler.cron_tasks import (
     CronTask,
@@ -22,7 +23,7 @@ from scheduler.cron_tasks import (
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from core.agent.agent import Agent
+    from core.queue.message_queue import MessageQueue
 
 logger = get_logger("cron_scheduler")
 
@@ -33,13 +34,12 @@ FILE_RELOAD_INTERVAL_S = 5.0
 class CronTaskScheduler:
     """asyncio-based cron task scheduler.
 
-    Shares an ``asyncio.Lock`` with the API layer so that Agent.run()
-    is never called concurrently from both the scheduler and a curl request.
+    Fires tasks by enqueuing them into the shared MessageQueue,
+    which ensures mutual exclusion with user messages and KAIROS ticks.
     """
 
-    def __init__(self, agent: Agent, agent_lock: asyncio.Lock) -> None:
-        self._agent = agent
-        self._lock = agent_lock
+    def __init__(self, queue: MessageQueue) -> None:
+        self._queue = queue
         self._running = False
         self._loop_task: asyncio.Task[None] | None = None
 
@@ -109,9 +109,15 @@ class CronTaskScheduler:
         )
 
         try:
-            async with self._lock:
-                current_chat_id.set(task.chat_id)
-                reply = await self._agent.run(task.prompt, task.chat_id)
+            current_chat_id.set(task.chat_id)
+            msg = QueueMessage(
+                priority=MessagePriority.CRON,
+                mode="cron",
+                content=task.prompt,
+                chat_id=task.chat_id,
+            )
+            future = await self._queue.enqueue(msg)
+            reply = await future
             logger.info(
                 "[CronFire] 任务 %s 完成，回复: %s",
                 task.id, reply[:200],

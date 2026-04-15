@@ -101,6 +101,13 @@ _DEFAULT_CONFIG_TEMPLATE: dict[str, Any] = {
         "poll_interval": 900,
         "workspace_dir": "/workspace",
         "api_key": "${OPENAI_API_KEY}",
+        "forge_plan_schedule": "23:00",
+    },
+    "kairos": {
+        "enabled": True,
+        "default_sleep_seconds": 300,
+        "max_sleep_seconds": 3600,
+        "min_sleep_seconds": 30,
     },
 }
 
@@ -124,7 +131,9 @@ def ensure_heartclaw_dirs() -> Path:
         home / "tiangong" / "orders" / "pending",
         home / "tiangong" / "orders" / "processing",
         home / "tiangong" / "orders" / "done",
+        home / "tiangong" / "orders" / "review",
         home / "tiangong" / "codex",
+        home / "skills" / "memory" / "kairos",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
@@ -260,6 +269,16 @@ class TianGongConfig:
     poll_interval: int = 900
     workspace_dir: str = "/workspace"
     api_key: str = ""
+    forge_plan_schedule: str = "23:00"
+
+
+@dataclass
+class KairosConfig:
+    """KAIROS 自治模式配置。"""
+    enabled: bool = True
+    default_sleep_seconds: int = 300
+    max_sleep_seconds: int = 3600
+    min_sleep_seconds: int = 30
 
 
 @dataclass
@@ -278,6 +297,7 @@ class AppConfig:
     retry: RetryConfig = field(default_factory=RetryConfig)
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     tiangong: TianGongConfig = field(default_factory=TianGongConfig)
+    kairos: KairosConfig = field(default_factory=KairosConfig)
 
     # ---- convenience properties ----
 
@@ -326,6 +346,10 @@ class AppConfig:
         return self.app.channel_mode
 
     @property
+    def kairos_memory_dir(self) -> Path:
+        return get_heartclaw_home() / "skills" / "memory" / "kairos"
+
+    @property
     def compression_threshold(self) -> float:
         return self.memory.short_term.compression_threshold
 
@@ -357,6 +381,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
     st_raw = memory_raw.get("short_term", {})
     lt_raw = memory_raw.get("long_term", {})
     tiangong_raw = raw.get("tiangong", {})
+    kairos_raw = raw.get("kairos", {})
 
     models: dict[str, ModelConfig] = {}
     for tier_name, tier_raw in raw.get("models", {}).items():
@@ -374,6 +399,7 @@ def _build_config(raw: dict[str, Any]) -> AppConfig:
         retry=RetryConfig(**retry_raw),
         feishu=FeishuConfig(**feishu_raw),
         tiangong=TianGongConfig(**tiangong_raw),
+        kairos=KairosConfig(**kairos_raw),
     )
 
 

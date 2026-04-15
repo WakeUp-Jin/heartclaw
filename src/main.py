@@ -22,9 +22,10 @@ from core.tool.manager import ToolManager
 from core.tool.scheduler import ToolScheduler, ToolSchedulerConfig
 from core.tool.approval import ApprovalStore
 from core.tool.types import ApprovalMode
-from core.tool.memory_tools import register_memory_tools
+from core.tool.tools.memory.memory_tools import register_memory_tools
 from core.agent.agent import Agent
 from scheduler.memory_updater import MemoryUpdateScheduler
+from scheduler.forge_plan_scheduler import ForgePlanScheduler
 
 from storage.short_memory_store import ShortMemoryStore
 from storage.memory_store import LocalMemoryStore
@@ -33,16 +34,22 @@ from channels.feishu.channel import FeishuChannel
 from channels.registry import get_all_channels, register_channel
 
 from api.app import create_app
-from api.routes.chat import set_agent, set_agent_lock
+from api.routes.chat import set_agent, set_message_queue
 from api.routes.card_callback import set_approval_store
+from core.queue.message_queue import MessageQueue
+from core.queue.processor import QueueProcessor
+from core.reply import ReplyDispatcher, FutureBackend, CliBackend, FeishuBackend
 from scheduler.cron_scheduler import CronTaskScheduler
+from core.agent.kairos_agent import KairosRunner
 
 _memory_scheduler: MemoryUpdateScheduler | None = None
+_forge_plan_scheduler: ForgePlanScheduler | None = None
 _cron_scheduler: CronTaskScheduler | None = None
+_queue_processor_task: asyncio.Task | None = None
 
 
 async def startup() -> None:
-    global _memory_scheduler, _cron_scheduler
+    global _memory_scheduler, _forge_plan_scheduler, _cron_scheduler
     logger.info("=== HeartClaw starting ===")
 
     set_log_level(settings.log_level)
@@ -117,13 +124,49 @@ async def startup() -> None:
     set_agent(agent)
     logger.info("Agent created")
 
-    # 7.5. Agent lock + Cron task scheduler
-    agent_lock = asyncio.Lock()
-    set_agent_lock(agent_lock)
+    # 7.5. Message queue + reply dispatcher + KAIROS + processor + cron scheduler
+    global _queue_processor_task
 
-    _cron_scheduler = CronTaskScheduler(agent=agent, agent_lock=agent_lock)
+    queue = MessageQueue()
+    set_message_queue(queue)
+
+    reply_dispatcher = ReplyDispatcher()
+    reply_dispatcher.add_backend(FutureBackend())
+    reply_dispatcher.add_backend(CliBackend())
+
+    kairos_runner: KairosRunner | None = None
+    if settings.kairos.enabled:
+        kairos_storage = ShortMemoryStore(base_dir=settings.kairos_memory_dir)
+        kairos_runner = KairosRunner(
+            llm_registry=llm_registry,
+            tool_manager=tool_manager,
+            scheduler=scheduler,
+            kairos_storage=kairos_storage,
+            long_term_memory=long_term,
+            config=settings.kairos,
+            short_term_dir=settings.short_term_dir,
+            long_term_dir=settings.long_term_dir,
+        )
+        logger.info("KairosRunner created")
+
+    processor = QueueProcessor(
+        queue=queue,
+        agent=agent,
+        reply_dispatcher=reply_dispatcher,
+        kairos_runner=kairos_runner,
+        kairos_config=settings.kairos if settings.kairos.enabled else None,
+    )
+    _queue_processor_task = asyncio.create_task(processor.run())
+
+    _cron_scheduler = CronTaskScheduler(queue=queue)
     await _cron_scheduler.start()
-    logger.info("CronTaskScheduler started")
+
+    if settings.kairos.enabled:
+        logger.info("KAIROS autonomous mode enabled (tail-dispatch in QueueProcessor)")
+    else:
+        logger.info("KAIROS autonomous mode disabled")
+
+    logger.info("MessageQueue + QueueProcessor + CronTaskScheduler started")
 
     # 8. Memory update scheduler (daily LTM updates at configured time)
     _memory_scheduler = MemoryUpdateScheduler(
@@ -134,6 +177,14 @@ async def startup() -> None:
         schedule_time=settings.memory_update_schedule,
     )
     await _memory_scheduler.start()
+
+    # 8.5. Forge plan scheduler (daily forge plan analysis)
+    _forge_plan_scheduler = ForgePlanScheduler(
+        llm_low=llm_registry.get_low(),
+        short_memory_store=short_memory_storage,
+        schedule_time=settings.tiangong.forge_plan_schedule,
+    )
+    await _forge_plan_scheduler.start()
 
     # 9. Clean up old memory directory (migrated to skills/memory/)
     old_memory_dir = get_heartclaw_home() / "memory"
@@ -146,8 +197,21 @@ async def startup() -> None:
 
     # 10. Channel (controlled by HEARTCLAW_CHANNEL_MODE)
     if settings.channel_mode == "feishu":
-        async def on_message(text: str, chat_id: str, open_id: str) -> str:
-            return await agent.run(text, chat_id, open_id)
+        from core.queue.types import QueueMessage, MessagePriority
+        from core.agent.context_vars import current_chat_id
+
+        async def on_message(text: str, chat_id: str, open_id: str) -> None:
+            current_chat_id.set(chat_id)
+            msg = QueueMessage(
+                priority=MessagePriority.USER,
+                mode="user",
+                content=text,
+                chat_id=chat_id,
+                open_id=open_id,
+                source_channel="feishu",
+            )
+            future = await queue.enqueue(msg)
+            await future
 
         channel = FeishuChannel(
             app_id=settings.feishu_app_id,
@@ -156,6 +220,7 @@ async def startup() -> None:
         )
         await channel.connect()
         register_channel(channel)
+        reply_dispatcher.add_backend(FeishuBackend(channel))
         logger.info("FeishuChannel connected (p2p single-chat)")
 
         async def send_card(chat_id: str, card_json: str) -> None:
@@ -170,11 +235,22 @@ async def startup() -> None:
 
 
 async def shutdown() -> None:
-    global _memory_scheduler, _cron_scheduler
+    global _memory_scheduler, _forge_plan_scheduler, _cron_scheduler, _queue_processor_task
     logger.info("=== HeartClaw shutting down ===")
 
     if _cron_scheduler:
         await _cron_scheduler.stop()
+
+    if _queue_processor_task:
+        _queue_processor_task.cancel()
+        try:
+            await _queue_processor_task
+        except asyncio.CancelledError:
+            pass
+        _queue_processor_task = None
+
+    if _forge_plan_scheduler:
+        await _forge_plan_scheduler.stop()
 
     if _memory_scheduler:
         await _memory_scheduler.stop()
