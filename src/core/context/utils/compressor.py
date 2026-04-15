@@ -16,56 +16,11 @@ from typing import Callable, Awaitable
 
 from core.context.types import ContextItem, CompressionResult
 from core.context.utils.token_estimator import TokenEstimator
-
-
-# ------------------------------------------------------------------
-# Prompt templates
-# ------------------------------------------------------------------
-
-_WEEK_PROMPT = (
-    "请将以下 {n} 天的对话记录压缩为周摘要。\n\n"
-    "要求：\n"
-    "- 按时间线梳理本周发生了什么\n"
-    "- 保留所有关键事件和交互\n"
-    "- 保留涉及的文件路径和技术决策\n"
-    "- 保留未完成的任务\n"
-    "- 追求事件完整性\n\n"
-    "日期范围: {start} 到 {end}\n\n"
-    "---对话记录---\n{content}\n"
-)
-
-_MONTH_PROMPT = (
-    "请将以下一个月的对话记录和周摘要合并为月摘要。\n\n"
-    "要求：\n"
-    "- 提炼本月的核心决策和重要变化\n"
-    "- 保留关键技术选型和架构决策\n"
-    "- 保留重要的项目里程碑\n"
-    "- 追求关键节点的准确性\n\n"
-    "月份: {month}\n\n"
-    "---周摘要---\n{week_summaries}\n\n"
-    "---原始对话记录---\n{daily_content}\n"
-)
-
-_YEAR_PROMPT = (
-    "请将以下月摘要合并为年度摘要。\n\n"
-    "要求：\n"
-    "- 提炼本年最重要的里程碑\n"
-    "- 保留影响深远的决策\n"
-    "- 保留重大项目成果\n"
-    "- 保持简洁，突出重点\n\n"
-    "年份: {year}\n\n"
-    "---月摘要---\n{month_summaries}\n"
-)
-
-_INTRA_DAY_PROMPT = (
-    "请将以下对话记录压缩为简洁的摘要。\n\n"
-    "要求：\n"
-    "- 保留所有关键决策和结论\n"
-    "- 保留涉及的文件路径和代码变更\n"
-    "- 保留未完成的任务和计划\n"
-    "- 保留用户的偏好和约束条件\n"
-    "- 删除重复信息和不重要的对话\n"
-    "- 使用简洁的描述性语言\n\n"
+from core.prompts.compression import (
+    WEEK_PROMPT,
+    MONTH_PROMPT,
+    YEAR_PROMPT,
+    INTRA_DAY_PROMPT,
 )
 
 
@@ -98,7 +53,7 @@ class ContextCompressor:
         start = daily_jsonl_paths[0].stem if daily_jsonl_paths else "?"
         end = daily_jsonl_paths[-1].stem if daily_jsonl_paths else "?"
 
-        prompt = _WEEK_PROMPT.format(
+        prompt = WEEK_PROMPT.format(
             n=len(daily_jsonl_paths),
             start=start,
             end=end,
@@ -123,7 +78,7 @@ class ContextCompressor:
         daily_content = "\n\n".join(daily_parts) if daily_parts else "(无日记录)"
         week_content = "\n\n---\n\n".join(week_summary_texts) if week_summary_texts else "(无周摘要)"
 
-        prompt = _MONTH_PROMPT.format(
+        prompt = MONTH_PROMPT.format(
             month=month_label,
             week_summaries=week_content,
             daily_content=daily_content,
@@ -138,7 +93,7 @@ class ContextCompressor:
     ) -> str:
         """Combine month summaries into a year summary."""
         content = "\n\n---\n\n".join(month_summary_texts)
-        prompt = _YEAR_PROMPT.format(year=year_label, month_summaries=content)
+        prompt = YEAR_PROMPT.format(year=year_label, month_summaries=content)
         return await summarize_fn(prompt)
 
     # ------------------------------------------------------------------
@@ -165,7 +120,7 @@ class ContextCompressor:
             return CompressionResult(compressed=False, reason="nothing_to_compress")
 
         text = self._items_to_text(to_compress)
-        prompt = _INTRA_DAY_PROMPT + text
+        prompt = INTRA_DAY_PROMPT + text
 
         summary = await summarize_fn(prompt)
 

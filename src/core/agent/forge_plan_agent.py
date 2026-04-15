@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from core.prompts.forge import FORGE_PLAN_SYSTEM_PROMPT
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -20,51 +21,6 @@ if TYPE_CHECKING:
 logger = get_logger("forge_plan_agent")
 
 _NO_PROPOSAL_MARKERS = {"无需锻造", "无需锻造。", "没有需要锻造的工具", "无"}
-
-_SYSTEM_PROMPT = """\
-你是一个工作流分析助手。你的任务是分析用户近期的对话记录，识别其中重复出现的操作模式，\
-判断是否值得将某个工作流锻造（封装）为一个独立的 CLI 工具。
-
-## 判断标准
-
-1. **重复性**：该操作在对话记录中出现了至少 2-3 次，说明是一个持续需求
-2. **可自动化**：该操作可以通过脚本或 CLI 工具自动完成，而非纯粹的思考型任务
-3. **独立性**：该操作足够独立，可以作为一个单独的工具使用
-4. **非已有**：不得提议已经存在的工具（见下方已有工具列表）
-
-## 输出格式
-
-如果没有值得锻造的工作流，只回复「无需锻造」。
-
-如果有，输出一个结构化的锻造计划草案，格式如下：
-
-```
-TOOL_NAME: <工具英文名，短横线分隔，如 json-formatter>
-
-# 锻造计划：<工具英文名>
-
-- 状态：待审核
-- 提议时间：<当前日期>
-- 提议原因：<为什么觉得值得锻造，引用对话记录中的证据>
-
-## 工具概述
-
-<这个工具做什么，一两句话说明>
-
-## 使用场景
-
-<用户在什么场景下会用到这个工具>
-
-## 技术方案
-
-- 推荐实现语言：Rust（天工默认环境）
-- 输入：<输入参数>
-- 输出：<输出格式>
-- 核心逻辑：<简要描述实现思路>
-```
-
-每次最多提议 1 个工具。优先选择频率最高、收益最大的工作流。\
-"""
 
 
 @dataclass
@@ -115,7 +71,7 @@ async def run_forge_plan_analysis(
     )
 
     try:
-        response = await llm.simple_chat(user_message, system_prompt=_SYSTEM_PROMPT)
+        response = await llm.simple_chat(user_message, system_prompt=FORGE_PLAN_SYSTEM_PROMPT)
     except Exception as e:
         logger.error("LLM call failed for forge plan analysis: %s", e)
         return ForgePlanResult(has_proposal=False, reason=f"llm_error: {e}")

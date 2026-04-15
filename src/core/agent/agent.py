@@ -13,7 +13,9 @@ from core.tool.tools.tiangong_feedback import TianGongFeedbackTool
 from core.tool.tools.cron_create import CronCreateTool
 from core.tool.tools.cron_list import CronListTool
 from core.tool.tools.cron_delete import CronDeleteTool
-from core.tool.tools.write_file import WriteFileTool
+from core.tool.tools.edit import EditTool
+from core.tool.tools.write import WriteTool
+from core.prompts.compression import SUMMARIZER_SYSTEM_PROMPT
 from utils.logger import get_logger
 from utils.token_counter import TokenCounter
 
@@ -131,7 +133,8 @@ class Agent:
         self._tool_manager.register(CronCreateTool)
         self._tool_manager.register(CronListTool)
         self._tool_manager.register(CronDeleteTool)
-        self._tool_manager.register(WriteFileTool)
+        self._tool_manager.register(EditTool)
+        self._tool_manager.register(WriteTool)
         logger.info("Built-in tools registered: %s", self._tool_manager.list_tools())
 
     def _handle_clear(self) -> str:
@@ -145,10 +148,7 @@ class Agent:
         async def summarize_fn(text: str) -> str:
             return await llm_low.simple_chat(
                 text,
-                system_prompt=(
-                    "你是一个对话摘要助手。请将给定的对话内容压缩为结构化的摘要。"
-                    "保留关键决策、文件路径、技术选型和未完成的任务。"
-                ),
+                system_prompt=SUMMARIZER_SYSTEM_PROMPT,
             )
 
         try:

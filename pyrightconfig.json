@@ -1,9 +1,15 @@
 {
-    "typeCheckingMode": "basic",
-    "reportMissingTypeStubs": "none",
-    "reportUnknownVariableType": "none",
-    "reportUnknownMemberType": "none",
-    "reportUnknownArgumentType": "none",
-    "reportUnknownParameterType": "none",
-  }
-  
+  "include": ["src"],
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "executionEnvironments": [
+    {
+      "root": "src",
+      "extraPaths": ["src"]
+    }
+  ]
+}
