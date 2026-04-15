@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,14 +33,16 @@ from channels.feishu.channel import FeishuChannel
 from channels.registry import get_all_channels, register_channel
 
 from api.app import create_app
-from api.routes.chat import set_agent
+from api.routes.chat import set_agent, set_agent_lock
 from api.routes.card_callback import set_approval_store
+from scheduler.cron_scheduler import CronTaskScheduler
 
 _memory_scheduler: MemoryUpdateScheduler | None = None
+_cron_scheduler: CronTaskScheduler | None = None
 
 
 async def startup() -> None:
-    global _memory_scheduler
+    global _memory_scheduler, _cron_scheduler
     logger.info("=== HeartClaw starting ===")
 
     set_log_level(settings.log_level)
@@ -114,6 +117,14 @@ async def startup() -> None:
     set_agent(agent)
     logger.info("Agent created")
 
+    # 7.5. Agent lock + Cron task scheduler
+    agent_lock = asyncio.Lock()
+    set_agent_lock(agent_lock)
+
+    _cron_scheduler = CronTaskScheduler(agent=agent, agent_lock=agent_lock)
+    await _cron_scheduler.start()
+    logger.info("CronTaskScheduler started")
+
     # 8. Memory update scheduler (daily LTM updates at configured time)
     _memory_scheduler = MemoryUpdateScheduler(
         llm_low=llm_registry.get_low(),
@@ -159,8 +170,11 @@ async def startup() -> None:
 
 
 async def shutdown() -> None:
-    global _memory_scheduler
+    global _memory_scheduler, _cron_scheduler
     logger.info("=== HeartClaw shutting down ===")
+
+    if _cron_scheduler:
+        await _cron_scheduler.stop()
 
     if _memory_scheduler:
         await _memory_scheduler.stop()
