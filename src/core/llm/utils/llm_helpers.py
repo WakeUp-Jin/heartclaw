@@ -17,16 +17,6 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "lmstudio": "http://localhost:1234/v1",
 }
 
-DEFAULT_CONTEXT_WINDOWS: dict[str, dict[str, int]] = {
-    "kimi": {"kimi-k2.5": 256000, "default": 128000},
-    "volcengine": {"doubao-seed-2.0-lite": 256000, "default": 128000},
-    "openai": {"gpt-4o": 128000, "gpt-4": 8192, "gpt-3.5-turbo": 16385, "default": 8192},
-    "anthropic": {"default": 200000},
-    "deepseek": {"default": 128000},
-    "ollama": {"default": 8192},
-}
-
-
 def extract_api_key(config: LLMConfig) -> str:
     """提取 API Key。
 
@@ -67,9 +57,3 @@ def get_base_url(config: LLMConfig) -> str:
         )
 
     return base_url
-
-
-def get_default_context_window(provider: str, model: str | None = None) -> int:
-    """获取默认上下文窗口大小。"""
-    provider_defaults = DEFAULT_CONTEXT_WINDOWS.get(provider.lower(), {"default": 8192})
-    return provider_defaults.get(model or "default", provider_defaults.get("default", 8192))

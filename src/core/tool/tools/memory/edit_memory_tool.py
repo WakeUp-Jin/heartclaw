@@ -13,40 +13,40 @@ from __future__ import annotations
 import json
 from typing import Any, TYPE_CHECKING
 
+from core.tool.types import ToolParameterSchema
 from storage.memory_store import VALID_FILES
 
 if TYPE_CHECKING:
     from storage.memory_store import LocalMemoryStore
 
 
-edit_memory_def: dict[str, Any] = {
-    "name": "edit_memory",
-    "description": (
+EDIT_MEMORY_DESCRIPTION = (
         "精确编辑长期记忆文件。使用 old_string + new_string 替换模型。"
         "添加：old_string 为空，new_string 为新内容；"
         "删除：new_string 为空；"
         "修改：两者都填写。"
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "file": {
-                "type": "string",
-                "enum": sorted(VALID_FILES),
-                "description": "要编辑的长期记忆文件名",
-            },
-            "old_string": {
-                "type": "string",
-                "description": "要替换的原文（添加时留空）",
-            },
-            "new_string": {
-                "type": "string",
-                "description": "替换后的内容（删除时留空）",
-            },
+)
+
+
+EditMemoryParameters = ToolParameterSchema(
+    type="object",
+    properties={
+        "file": {
+            "type": "string",
+            "enum": sorted(VALID_FILES),
+            "description": "要编辑的长期记忆文件名",
         },
-        "required": ["file", "new_string"],
+        "old_string": {
+            "type": "string",
+            "description": "要替换的原文（添加时留空）",
+        },
+        "new_string": {
+            "type": "string",
+            "description": "替换后的内容（删除时留空）",
+        },
     },
-}
+    required=["file", "new_string"],
+)
 
 
 def _fuzzy_find(content: str, target: str) -> tuple[int, int] | None:

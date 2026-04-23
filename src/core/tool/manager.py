@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import warnings
-from typing import Any, Callable, Awaitable
+from typing import Any
 
-from core.tool.types import InternalTool, ToolParameterSchema, ToolResult
+from core.tool.types import InternalTool, ToolResult
 from utils.logger import get_logger
 
 logger = get_logger("tool.manager")
@@ -25,37 +24,6 @@ class ToolManager:
         self._tools[tool.name] = tool
         logger.debug("Registered tool: %s [%s]", tool.name, tool.category)
 
-    def register_legacy(
-        self,
-        name: str,
-        definition: dict[str, Any],
-        handler: Callable[[dict[str, Any]], Awaitable[ToolResult]],
-        category: str = "general",
-    ) -> None:
-        """[Deprecated] 兼容旧式 dict 定义的注册方式。
-
-        将原始 dict 格式（name/description/parameters）+ handler
-        转成 InternalTool 后注册。memory_tools 仍在使用，
-        后续迁移为 InternalTool 后移除此方法。
-        """
-        warnings.warn(
-            f"register_legacy('{name}') is deprecated, migrate to InternalTool",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        params_raw = definition.get("parameters", {})
-        tool = InternalTool(
-            name=name,
-            description=definition.get("description", ""),
-            parameters=ToolParameterSchema(
-                type=params_raw.get("type", "object"),
-                properties=params_raw.get("properties", {}),
-                required=params_raw.get("required", []),
-            ),
-            handler=handler,
-            category=category,
-        )
-        self.register(tool)
     # ------------------------------------------------------------------
     # 查询
     # ------------------------------------------------------------------
