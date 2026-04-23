@@ -5,7 +5,6 @@ from core.tool.tools.cron_delete.executor import cron_delete_handler, render_cro
 
 CronDeleteTool = InternalTool(
     name="CronDelete",
-    category="scheduler",
     description="删除一个已创建的定时任务。需要提供 CronCreate 返回的任务 ID。",
     parameters=ToolParameterSchema(
         type="object",
@@ -19,6 +18,6 @@ CronDeleteTool = InternalTool(
     ),
     handler=cron_delete_handler,
     render_result=render_cron_delete_result,
+    category="scheduler",
     is_read_only=False,
-    should_confirm=None,
 )

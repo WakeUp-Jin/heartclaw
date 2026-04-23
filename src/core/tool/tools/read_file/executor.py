@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from core.tool.tools.shared.file_read_tracker import file_read_tracker
 from core.tool.types import ToolResult
 
 MAX_OUTPUT_CHARS = 100_000
@@ -49,6 +50,10 @@ async def read_file_handler(args: dict[str, Any]) -> ToolResult:
     if len(content) > MAX_OUTPUT_CHARS:
         half = MAX_OUTPUT_CHARS // 2
         content = content[:half] + "\n\n... [truncated] ...\n\n" + content[-half:]
+
+    # 记录文件读取状态，供 Edit/Write 的 TOCTOU 检查使用
+    is_partial = (offset > 0) or (len(selected) < total_lines)
+    file_read_tracker.record_read(file_path, is_partial=is_partial)
 
     return ToolResult.ok(ReadFileData(
         content=content,

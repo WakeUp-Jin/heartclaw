@@ -5,7 +5,6 @@ from core.tool.tools.cron_create.executor import cron_create_handler, render_cro
 
 CronCreateTool = InternalTool(
     name="CronCreate",
-    category="scheduler",
     description=(
         "创建一个定时任务。到指定时间后，系统会自动将 prompt 作为用户输入交给 Agent 执行。\n"
         "\n"
@@ -42,6 +41,6 @@ CronCreateTool = InternalTool(
     ),
     handler=cron_create_handler,
     render_result=render_cron_create_result,
+    category="scheduler",
     is_read_only=False,
-    should_confirm=None,
 )

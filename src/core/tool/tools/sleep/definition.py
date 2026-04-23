@@ -5,7 +5,6 @@ from core.tool.tools.sleep.executor import sleep_handler, render_sleep_result
 
 SleepTool = InternalTool(
     name="Sleep",
-    category="kairos",
     description=(
         "控制下次醒来的等待时长。仅在 KAIROS 自治模式下可用。\n"
         "\n"
@@ -29,6 +28,6 @@ SleepTool = InternalTool(
     ),
     handler=sleep_handler,
     render_result=render_sleep_result,
+    category="kairos",
     is_read_only=True,
-    should_confirm=None,
 )

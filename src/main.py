@@ -104,12 +104,18 @@ async def startup() -> None:
     approval_store = ApprovalStore()
     set_approval_store(approval_store)
 
+    llm_low = llm_registry.get_low()
+
+    async def tool_summarize_fn(text: str) -> str:
+        return await llm_low.simple_chat(text)
+
     scheduler_config = ToolSchedulerConfig(
         approval_mode=ApprovalMode.YOLO,
     )
     scheduler = ToolScheduler(
         tool_manager=tool_manager,
         approval_store=approval_store,
+        summarize_fn=tool_summarize_fn,
         config=scheduler_config,
     )
     logger.info("ToolScheduler created (mode=%s)", scheduler_config.approval_mode.value)

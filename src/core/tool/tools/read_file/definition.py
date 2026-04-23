@@ -1,11 +1,32 @@
 """ReadFile 工具定义。"""
 
-from core.tool.types import InternalTool, ToolParameterSchema
+import os
+from typing import Any
+
+from core.tool.types import InternalTool, ToolParameterSchema, PermissionResult
 from core.tool.tools.read_file.executor import read_file_handler, render_read_file_result
+
+
+async def read_file_check_permissions(args: dict[str, Any]) -> PermissionResult:
+    """ReadFile 工具的权限验证：检查路径参数并展开为绝对路径。"""
+    file_path = args.get("file_path", "").strip()
+    if not file_path:
+        return PermissionResult.fail("file_path 不能为空")
+
+    file_path = os.path.expanduser(file_path)
+    if not os.path.isabs(file_path):
+        file_path = os.path.abspath(file_path)
+
+    if not os.path.isfile(file_path):
+        return PermissionResult.fail(f"文件不存在: {file_path}")
+
+    sanitized = dict(args)
+    sanitized["file_path"] = file_path
+    return PermissionResult.ok(sanitized_args=sanitized)
+
 
 ReadFileTool = InternalTool(
     name="ReadFile",
-    category="filesystem",
     description=(
         "读取指定文件的内容。支持通过 offset 和 limit 分页读取大文件。"
         "输出带行号前缀，便于引用。"
@@ -29,7 +50,8 @@ ReadFileTool = InternalTool(
         required=["file_path"],
     ),
     handler=read_file_handler,
+    check_permissions=read_file_check_permissions,
     render_result=render_read_file_result,
+    category="filesystem",
     is_read_only=True,
-    should_confirm=False,
 )

@@ -7,9 +7,13 @@ import time
 
 
 class ToolCallStatus(str, Enum):
-    """工具调用生命周期状态"""
+    """工具调用生命周期状态
+
+    完整流程: validating -> awaiting_approval -> scheduled -> executing -> success/error/cancelled
+    """
     VALIDATING = "validating"
     AWAITING_APPROVAL = "awaiting_approval"
+    SCHEDULED = "scheduled"
     EXECUTING = "executing"
     SUCCESS = "success"
     ERROR = "error"
@@ -63,16 +67,45 @@ class ToolResult:
 
 
 @dataclass
+class PermissionResult:
+    """权限验证函数 (check_permissions) 的返回结果。
+
+    - passed=True  表示验证通过，可继续调度
+    - passed=False 表示验证失败，调度器会将状态设为 ERROR
+    - sanitized_args 可以携带验证后修正过的参数（如路径展开、默认值填充），
+      调度器会用它替换原始 args 传给 handler
+    """
+    passed: bool
+    error: str | None = None
+    sanitized_args: dict[str, Any] | None = None
+
+    @staticmethod
+    def ok(sanitized_args: dict[str, Any] | None = None) -> PermissionResult:
+        return PermissionResult(passed=True, sanitized_args=sanitized_args)
+
+    @staticmethod
+    def fail(error: str) -> PermissionResult:
+        return PermissionResult(passed=False, error=error)
+
+
+@dataclass
 class InternalTool:
-    """工具定义——覆盖名称、描述、参数 Schema、执行函数、输出格式化"""
+    """工具定义——名称、描述、参数 Schema、执行函数、权限验证、输出格式化。
+
+    字段说明:
+    - handler:           工具的核心执行逻辑
+    - check_permissions: 可选的权限验证函数，在调度流程的 validating 阶段被调用
+    - render_result:     可选的结果格式化函数，将 ToolResult 转为大模型可读的字符串
+    - is_read_only:      标记为只读工具（影响审批模式判断和并行调度）
+    """
     name: str
-    category: str
     description: str
     parameters: ToolParameterSchema
     handler: Callable[[dict[str, Any]], Awaitable[ToolResult]]
+    check_permissions: Callable[[dict[str, Any]], Awaitable[PermissionResult]] | None = None
     render_result: Callable[[ToolResult], str] | None = None
+    category: str = "general"
     is_read_only: bool = False
-    should_confirm: bool | None = None  # None = 由 ApprovalMode 决定
 
     def get_openai_function(self) -> dict[str, Any]:
         """输出 OpenAI function calling 格式的工具定义"""

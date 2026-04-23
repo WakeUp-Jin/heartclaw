@@ -1,7 +1,13 @@
 """工具调度器 —— 管理工具调用的完整生命周期。
 
-参考 Reason Code 的 ToolScheduler，实现:
-  validating -> (awaiting_approval) -> executing -> success / error / cancelled
+完整流程:
+  validating (参数解析 + check_permissions)
+    -> awaiting_approval (审批模式检查)
+    -> scheduled (准备执行)
+    -> executing (执行 handler)
+    -> render_result (格式化)
+    -> OutputTruncator (裁剪/摘要)
+    -> success / error / cancelled
 """
 
 from __future__ import annotations
@@ -20,10 +26,19 @@ from core.tool.types import (
     ToolCallStatus,
 )
 from core.tool.approval import ApprovalStore, ApprovalOutcome
-from utils.logger import logger
+from core.tool.output_truncator import OutputTruncator
+from utils.logger import get_logger
+
+logger = get_logger("tool.scheduler")
 
 if TYPE_CHECKING:
     from core.tool.manager import ToolManager
+
+# 摘要函数类型: (text) -> summary_text
+SummarizeFn = Callable[[str], Awaitable[str]]
+
+# 审批卡片发送回调类型: (chat_id, card_json_str) -> None
+SendCardFn = Callable[[str, str], Awaitable[None]]
 
 
 class ToolSchedulerConfig:
@@ -38,20 +53,38 @@ class ToolSchedulerConfig:
         self.approval_timeout = approval_timeout
 
 
-# 审批卡片发送回调类型: (chat_id, card_json_str) -> None
-SendCardFn = Callable[[str, str], Awaitable[None]]
-
-
 class ToolScheduler:
+    """工具调度器：驱动工具调用的完整生命周期。
+
+    Parameters
+    ----------
+    tool_manager:
+        工具注册中心，提供工具查询和执行。
+    approval_store:
+        审批等待存储，桥接调度器与用户交互回调。
+    truncator:
+        工具输出裁剪器，控制结果写入上下文时的长度。
+    summarize_fn:
+        LLM 摘要函数（使用 low 模型），供 OutputTruncator 在裁剪时调用。
+    config:
+        调度器配置（审批模式、超时时间等）。
+    send_card:
+        发送审批卡片的回调函数。
+    """
+
     def __init__(
         self,
         tool_manager: ToolManager,
         approval_store: ApprovalStore,
+        truncator: OutputTruncator | None = None,
+        summarize_fn: SummarizeFn | None = None,
         config: ToolSchedulerConfig | None = None,
         send_card: SendCardFn | None = None,
     ) -> None:
         self._tool_manager = tool_manager
         self._approval_store = approval_store
+        self._truncator = truncator or OutputTruncator()
+        self._summarize_fn = summarize_fn
         self._config = config or ToolSchedulerConfig()
         self._send_card = send_card
         self._records: dict[str, ToolCallRecord] = {}
@@ -73,7 +106,7 @@ class ToolScheduler:
     ) -> ScheduleResult:
         """单个工具调用的完整调度流程。"""
 
-        # 1. validating ─ 参数解析 & 工具查找
+        # ── 1. validating: 参数解析 & 工具查找 ──
         record = ToolCallRecord(call_id=call_id, tool_name=tool_name)
         self._records[call_id] = record
 
@@ -88,7 +121,25 @@ class ToolScheduler:
         if tool is None:
             return self._set_error(record, f"工具不存在: {tool_name}")
 
-        # 2. 审批检查
+        # ── 2. validating: 调用工具的 check_permissions ──
+        if tool.check_permissions is not None:
+            try:
+                perm_result = await tool.check_permissions(args)
+            except Exception as e:
+                logger.error(
+                    "Tool %s check_permissions error: %s", tool_name, e, exc_info=True,
+                )
+                return self._set_error(record, f"权限验证异常: {e}")
+
+            if not perm_result.passed:
+                return self._set_error(
+                    record, perm_result.error or "权限验证未通过",
+                )
+            if perm_result.sanitized_args is not None:
+                args = perm_result.sanitized_args
+                record.args = args
+
+        # ── 3. awaiting_approval: 审批模式检查 ──
         needs_confirm = self._check_confirmation(tool)
         if needs_confirm:
             record.status = ToolCallStatus.AWAITING_APPROVAL
@@ -97,7 +148,6 @@ class ToolScheduler:
                 "Tool %s (call=%s) awaiting approval", tool_name, call_id,
             )
 
-            # 发送审批卡片 (如果配置了 send_card 且有 chat_id)
             if self._send_card and chat_id:
                 card_json = self._build_approval_card(call_id, tool_name, args)
                 try:
@@ -113,7 +163,10 @@ class ToolScheduler:
                 reason = "用户取消" if outcome == "cancel" else "审批超时"
                 return self._set_cancelled(record, reason)
 
-        # 3. executing
+        # ── 4. scheduled -> executing ──
+        record.status = ToolCallStatus.SCHEDULED
+        logger.info("Tool scheduled: %s (call=%s)", tool_name, call_id)
+
         record.status = ToolCallStatus.EXECUTING
         logger.info("Tool executing: %s (call=%s)", tool_name, call_id)
 
@@ -126,8 +179,12 @@ class ToolScheduler:
         if not tool_result.success:
             return self._set_error(record, tool_result.error or "工具执行失败")
 
-        # 4. 输出格式化 (render_result) -> success
+        # ── 5. render_result: 格式化为大模型可读的字符串 ──
         result_str = self._tool_manager.render(tool_name, tool_result)
+
+        # ── 6. OutputTruncator: 输出裁剪 ──
+        result_str = await self._truncator.truncate(result_str, self._summarize_fn)
+
         return self._set_success(record, result_str)
 
     async def schedule_batch(
@@ -173,19 +230,17 @@ class ToolScheduler:
     # ------------------------------------------------------------------
 
     def _check_confirmation(self, tool: InternalTool) -> ConfirmDetails | None:
-        """根据 ApprovalMode 和工具属性判断是否需要确认。"""
+        """根据 ApprovalMode 和工具属性判断是否需要确认。
+
+        YOLO 模式：全部自动放行
+        DEFAULT 模式：只读工具放行，非只读工具需要确认
+        """
         if self._config.approval_mode == ApprovalMode.YOLO:
             return None
 
-        # 工具显式声明不需要确认
-        if tool.should_confirm is False:
-            return None
-
-        # 只读工具不需要确认
         if tool.is_read_only:
             return None
 
-        # 工具显式声明需要确认，或 DEFAULT 模式下非只读工具
         return ConfirmDetails(
             title="工具执行确认",
             message=f"即将执行工具 {tool.name}，是否继续？",

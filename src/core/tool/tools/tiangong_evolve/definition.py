@@ -8,7 +8,6 @@ from core.tool.tools.tiangong_evolve.executor import (
 
 TianGongEvolveTool = InternalTool(
     name="TianGongEvolve",
-    category="tiangong",
     description=(
         "向天工下达锻造令，请求锻造新的 CLI 工具。"
         "天工会在下次巡查时开始锻造（默认每 15 分钟巡查一次）。"
@@ -42,6 +41,6 @@ TianGongEvolveTool = InternalTool(
     ),
     handler=tiangong_evolve_handler,
     render_result=render_evolve_result,
+    category="tiangong",
     is_read_only=False,
-    should_confirm=True,
 )

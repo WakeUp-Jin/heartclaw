@@ -57,9 +57,16 @@ def _build_agent() -> Agent:
     context_manager.init_skills(Path.cwd())
 
     approval_store = ApprovalStore()
+
+    llm_low = llm_registry.get_low()
+
+    async def tool_summarize_fn(text: str) -> str:
+        return await llm_low.simple_chat(text)
+
     scheduler = ToolScheduler(
         tool_manager=tool_manager,
         approval_store=approval_store,
+        summarize_fn=tool_summarize_fn,
         config=ToolSchedulerConfig(approval_mode=ApprovalMode.YOLO),
     )
 

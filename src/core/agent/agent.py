@@ -8,6 +8,8 @@ from core.context.types import ContextItem, ItemUsage, MessagePriority
 from core.tool.tools.bash import BashTool
 from core.tool.tools.read_file import ReadFileTool
 from core.tool.tools.list_files import ListFilesTool
+from core.tool.tools.grep import GrepTool
+from core.tool.tools.glob import GlobTool
 from core.tool.tools.tiangong_evolve import TianGongEvolveTool
 from core.tool.tools.tiangong_feedback import TianGongFeedbackTool
 from core.tool.tools.cron_create import CronCreateTool
@@ -127,6 +129,8 @@ class Agent:
         """注册 tools/ 目录下的内置工具。"""
         self._tool_manager.register(ReadFileTool)
         self._tool_manager.register(BashTool)
+        self._tool_manager.register(GrepTool)
+        self._tool_manager.register(GlobTool)
         self._tool_manager.register(ListFilesTool)
         self._tool_manager.register(TianGongEvolveTool)
         self._tool_manager.register(TianGongFeedbackTool)

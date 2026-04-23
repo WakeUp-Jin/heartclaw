@@ -8,7 +8,6 @@ from core.tool.tools.tiangong_feedback.executor import (
 
 TianGongFeedbackTool = InternalTool(
     name="TianGongFeedback",
-    category="tiangong",
     description=(
         "向天工反馈锻造工具的运行错误，请求重新锻造修复。"
         "天工会在下次巡查时基于之前的锻造记录和 Agent 会话上下文进行修复。"
@@ -43,6 +42,6 @@ TianGongFeedbackTool = InternalTool(
     ),
     handler=tiangong_feedback_handler,
     render_result=render_feedback_result,
+    category="tiangong",
     is_read_only=False,
-    should_confirm=True,
 )
