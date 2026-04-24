@@ -36,6 +36,7 @@ from channels.registry import get_all_channels, register_channel
 from api.app import create_app
 from api.routes.chat import set_agent, set_message_queue
 from api.routes.card_callback import set_approval_store
+from api.routes.ws import install_ws_log_handler
 from core.queue.message_queue import MessageQueue
 from core.queue.processor import QueueProcessor
 from core.reply import ReplyDispatcher, FutureBackend, CliBackend, FeishuBackend
@@ -53,6 +54,7 @@ async def startup() -> None:
     logger.info("=== HeartClaw starting ===")
 
     set_log_level(settings.log_level)
+    install_ws_log_handler()
 
     # 1. LLM Service Registry
     llm_registry = LLMServiceRegistry(settings)

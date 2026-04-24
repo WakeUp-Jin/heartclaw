@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import health, chat, webhook, card_callback
+from api.routes import health, chat, webhook, card_callback, ws, juanzong
 
 
 def create_app(*, lifespan: Any = None) -> FastAPI:
@@ -26,5 +26,7 @@ def create_app(*, lifespan: Any = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(webhook.router)
     app.include_router(card_callback.router)
+    app.include_router(ws.router)
+    app.include_router(juanzong.router)
 
     return app

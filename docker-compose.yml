@@ -35,13 +35,9 @@ services:
   web:
     build:
       context: apps/web
-      args:
-        VITE_API_BASE_URL: http://localhost:8000
     container_name: heartclaw-web
     restart: unless-stopped
     ports:
       - "5173:80"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
     depends_on:
       - ruyi-api
