@@ -12,8 +12,10 @@ services:
       - docker/env/heartclaw.env
     environment:
       - HEARTCLAW_HOME=/root/.heartclaw
+      - HEARTCLAW_LOG_FILE=/logs/ruyi-api.log
     volumes:
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}:/root/.heartclaw
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tmp/logs/services:/logs
 
   tiangong-worker:
     build:
@@ -24,6 +26,8 @@ services:
     env_file:
       - .env
       - docker/env/tiangong.env
+    environment:
+      - TIANGONG_LOG_FILE=/logs/tiangong-worker.log
     volumes:
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}:/shared
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/codex:/root/.codex
@@ -31,6 +35,7 @@ services:
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/opencode:/root/.local/share/opencode
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/opencode-config:/root/.config/opencode
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/workspace:/workspace
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tmp/logs/services:/logs
 
   web:
     build:
@@ -41,3 +46,5 @@ services:
       - "5173:80"
     depends_on:
       - ruyi-api
+    volumes:
+      - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tmp/logs/services:/logs

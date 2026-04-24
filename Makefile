@@ -1,4 +1,4 @@
-.PHONY: up down logs chat ps bootstrap cli dev web-dev web-build
+.PHONY: up down logs logs-dump chat ps bootstrap cli dev web-dev web-build
 
 bootstrap:
 	mkdir -p ~/.heartclaw
@@ -9,6 +9,8 @@ up:
 	mkdir -p $${HOME}/.heartclaw/tiangong/kimi
 	mkdir -p $${HOME}/.heartclaw/tiangong/opencode
 	mkdir -p $${HOME}/.heartclaw/tiangong/opencode-config
+	mkdir -p $${HOME}/.heartclaw/tmp/logs/docker
+	mkdir -p $${HOME}/.heartclaw/tmp/logs/services
 	docker compose up --build -d
 
 down:
@@ -16,6 +18,10 @@ down:
 
 logs:
 	docker compose logs -f
+
+logs-dump:
+	mkdir -p $${HOME}/.heartclaw/tmp/logs/docker
+	docker compose logs --no-color > $${HOME}/.heartclaw/tmp/logs/docker/compose.log
 
 chat:
 	@curl -sS http://localhost:8000/api/chat \

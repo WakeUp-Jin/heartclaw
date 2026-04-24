@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from config.settings import settings, get_heartclaw_home
-from utils.logger import logger, set_log_level
+from utils.logger import get_uvicorn_log_config, logger, set_log_level
 
 from core.llm.registry import LLMServiceRegistry
 from core.context.manager import ContextManager
@@ -290,6 +290,7 @@ def main() -> None:
         host="0.0.0.0",
         port=8000,
         log_level=settings.log_level.lower(),
+        log_config=get_uvicorn_log_config(settings.log_level),
     )
 
 

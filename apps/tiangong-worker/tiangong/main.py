@@ -16,10 +16,25 @@ from pathlib import Path
 
 from tiangong.engine import TianGongEngine
 
+_LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+
+
+def _build_log_handlers() -> list[logging.Handler]:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
+    log_file = os.environ.get("TIANGONG_LOG_FILE", "").strip()
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+
+    return handlers
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    stream=sys.stdout,
+    format=_LOG_FORMAT,
+    handlers=_build_log_handlers(),
+    force=True,
 )
 logger = logging.getLogger("tiangong.main")
 
