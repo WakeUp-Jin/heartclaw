@@ -19,6 +19,7 @@ export type ChatTool = {
 export type LogEntry = {
   timestamp: string
   level: 'INFO' | 'WARN' | 'ERROR'
+  source?: string
   message: string
 }
 
@@ -27,10 +28,44 @@ export type StatusUpdate = {
   tiangong: string
 }
 
+export type ToolStatus = {
+  source: 'ruyi' | 'kairos'
+  call_id: string
+  tool_name: string
+  status: 'executing' | 'success' | 'error' | 'cancelled'
+  args_summary: string
+  content?: string
+  result_preview?: string
+  error?: string
+  duration_ms?: number
+}
+
+export type KairosEvent = {
+  event: string
+  timestamp: string
+  detail: Record<string, unknown>
+}
+
+export type KairosReply = {
+  text: string
+  timestamp: string
+}
+
+export type ContainerLog = {
+  source: 'tiangong' | 'ruyi'
+  timestamp: string
+  level: string
+  message: string
+}
+
 export type WsMessage =
   | { type: 'chat_chunk'; data: ChatChunk }
   | { type: 'chat_tool'; data: ChatTool }
+  | { type: 'tool_status'; data: ToolStatus }
+  | { type: 'kairos_event'; data: KairosEvent }
+  | { type: 'kairos_reply'; data: KairosReply }
   | { type: 'log'; data: LogEntry }
+  | { type: 'container_log'; data: ContainerLog }
   | { type: 'status'; data: StatusUpdate }
 
 type Subscriber = (msg: WsMessage) => void

@@ -14,12 +14,12 @@ from datetime import datetime
 from typing import Any, Protocol, TYPE_CHECKING
 
 from config.settings import KairosConfig
+from core.output.types import FinalReplyEvent, KairosLifecycleEvent
 from core.queue.types import QueueMessage, MessagePriority
-from core.reply.types import ReplyEnvelope
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from core.reply.dispatcher import ReplyDispatcher
+    from core.output.emitter import OutputEmitter
 
 logger = get_logger("queue_processor")
 
@@ -55,13 +55,13 @@ class QueueProcessor:
         self,
         queue: Any,
         agent: AgentRunner,
-        reply_dispatcher: ReplyDispatcher,
+        emitter: OutputEmitter,
         kairos_runner: TickHandler | None = None,
         kairos_config: KairosConfig | None = None,
     ) -> None:
         self._queue = queue
         self._agent = agent
-        self._reply = reply_dispatcher
+        self._emitter = emitter
         self._kairos = kairos_runner
         self._kairos_config = kairos_config
         self._running = False
@@ -90,8 +90,14 @@ class QueueProcessor:
             result_text = ""
             tick_failed = False
             try:
+                if msg.mode == "tick":
+                    await self._emit_kairos("tick_start")
+
                 result_text = await self._dispatch(msg)
-                envelope = ReplyEnvelope(
+
+                source = "kairos" if msg.mode == "tick" else "ruyi"
+                event = FinalReplyEvent(
+                    source=source,
                     text=result_text,
                     mode=msg.mode,
                     chat_id=msg.chat_id,
@@ -100,8 +106,13 @@ class QueueProcessor:
                     source_msg_id=msg.id,
                     _future=msg._future,
                 )
-                await self._reply.dispatch(envelope)
+                await self._emitter.emit(event)
+
                 if msg.mode == "tick":
+                    await self._emit_kairos(
+                        "tick_done",
+                        {"result_preview": result_text[:200]},
+                    )
                     self._consecutive_tick_errors = 0
             except Exception as exc:
                 logger.error(
@@ -203,6 +214,8 @@ class QueueProcessor:
         )
         logger.debug("KAIROS sleeping for %ds", seconds)
 
+        await self._emit_kairos("sleep_start", {"sleep_seconds": seconds})
+
         self._queue.wake_event.clear()
         try:
             await asyncio.wait_for(
@@ -210,6 +223,19 @@ class QueueProcessor:
                 timeout=seconds,
             )
             logger.debug("KAIROS sleep interrupted by incoming message")
+            await self._emit_kairos("sleep_interrupted")
             return True
         except asyncio.TimeoutError:
+            await self._emit_kairos("sleep_done", {"slept_seconds": seconds})
             return False
+
+    # ------------------------------------------------------------------
+    # Kairos lifecycle events
+    # ------------------------------------------------------------------
+
+    async def _emit_kairos(self, event_name: str, detail: dict | None = None) -> None:
+        await self._emitter.emit(KairosLifecycleEvent(
+            source="kairos",
+            event=event_name,
+            detail=detail or {},
+        ))

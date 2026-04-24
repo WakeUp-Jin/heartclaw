@@ -1,42 +1,20 @@
-import { useState, useEffect, useCallback } from 'react'
-import LogToolbar from '../components/log/LogToolbar'
+import { useState } from 'react'
+import LogToolbar, { type LogLevel, type LogSource } from '../components/log/LogToolbar'
 import LogList from '../components/log/LogList'
-import { useWebSocket, type WsMessage } from '../hooks/useWebSocket'
-import type { LogItem } from '../components/log/LogEntry'
-
-type LogLevel = 'ALL' | 'INFO' | 'WARN' | 'ERROR'
-
-let logCounter = 0
+import { useAppStore } from '../stores/useAppStore'
 
 export default function TiangongPage() {
-  const [logs, setLogs] = useState<LogItem[]>([])
+  const { tiangongLogs, ruyiDebugLogs } = useAppStore().tiangong
   const [activeLevel, setActiveLevel] = useState<LogLevel>('ALL')
   const [search, setSearch] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
-  const { subscribe } = useWebSocket()
+  const [logSource, setLogSource] = useState<LogSource>('tiangong')
 
-  const handleWsMessage = useCallback((msg: WsMessage) => {
-    if (msg.type === 'log') {
-      const entry: LogItem = {
-        id: `log-${++logCounter}`,
-        timestamp: msg.data.timestamp,
-        level: msg.data.level,
-        message: msg.data.message,
-      }
-      setLogs((prev) => {
-        const next = [...prev, entry]
-        if (next.length > 2000) return next.slice(-1500)
-        return next
-      })
-    }
-  }, [])
+  const isDebug = logSource === 'ruyi-debug'
+  const baseLogs = isDebug ? ruyiDebugLogs : tiangongLogs
 
-  useEffect(() => {
-    return subscribe(handleWsMessage)
-  }, [subscribe, handleWsMessage])
-
-  const filteredLogs = logs.filter((entry) => {
-    if (activeLevel !== 'ALL' && entry.level !== activeLevel) return false
+  const filteredLogs = baseLogs.filter((entry) => {
+    if (!isDebug && activeLevel !== 'ALL' && entry.level !== activeLevel) return false
     if (search && !entry.message.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -44,7 +22,7 @@ export default function TiangongPage() {
   return (
     <div className="tiangong-page">
       <div className="tiangong-header">
-        <h1>天工</h1>
+        <h1>{isDebug ? '如意调试日志' : '天工'}</h1>
       </div>
       <LogToolbar
         activeLevel={activeLevel}
@@ -53,6 +31,8 @@ export default function TiangongPage() {
         onSearchChange={setSearch}
         autoScroll={autoScroll}
         onAutoScrollToggle={() => setAutoScroll(!autoScroll)}
+        logSource={logSource}
+        onLogSourceChange={setLogSource}
       />
       <LogList
         entries={filteredLogs}

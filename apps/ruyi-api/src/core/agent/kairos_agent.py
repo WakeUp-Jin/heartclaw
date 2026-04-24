@@ -81,6 +81,7 @@ class KairosRunner:
         result = await self._engine.run(
             llm, messages, tools,
             on_message=lambda m: self._persist(ContextItem.from_message(m, source="engine")),
+            source="kairos",
         )
 
         self._persist(ContextItem(
@@ -167,7 +168,8 @@ class KairosRunner:
     def _update_history(self, tick_content: str, reply: str) -> None:
         """更新内存中的最近 tick 交互记录。"""
         self._recent_history.append({"role": "user", "content": tick_content})
-        self._recent_history.append({"role": "assistant", "content": reply})
+        if reply.strip():
+            self._recent_history.append({"role": "assistant", "content": reply})
         if len(self._recent_history) > MAX_HISTORY_MESSAGES:
             self._recent_history = self._recent_history[-MAX_HISTORY_MESSAGES:]
 

@@ -64,11 +64,9 @@ def _entry_sort_key(path: Path) -> tuple[int, str]:
     return (is_file, path.name.lower())
 
 
-def _build_tree(root: Path, prefix: str = "") -> dict | None:
-    """Recursively build a file tree dict."""
+def _build_tree(root: Path, rel_path: str = "") -> dict | None:
+    """Recursively build a file tree dict using paths relative to .heartclaw/."""
     name = root.name
-    rel_path = f"{prefix}/{name}" if prefix else name
-    rel_path = rel_path.lstrip("/")
 
     if rel_path and _should_skip(root, rel_path):
         return None
@@ -89,7 +87,7 @@ def _build_tree(root: Path, prefix: str = "") -> dict | None:
         child_rel_path = f"{rel_path}/{entry.name}" if rel_path else entry.name
         if _should_skip(entry, child_rel_path):
             continue
-        child = _build_tree(entry, rel_path)
+        child = _build_tree(entry, child_rel_path)
         if child is not None:
             children.append(child)
 

@@ -32,6 +32,7 @@ from utils.logger import get_logger
 logger = get_logger("tool.scheduler")
 
 if TYPE_CHECKING:
+    from core.output.emitter import OutputEmitter
     from core.tool.manager import ToolManager
 
 # 摘要函数类型: (text) -> summary_text
@@ -80,6 +81,7 @@ class ToolScheduler:
         summarize_fn: SummarizeFn | None = None,
         config: ToolSchedulerConfig | None = None,
         send_card: SendCardFn | None = None,
+        emitter: OutputEmitter | None = None,
     ) -> None:
         self._tool_manager = tool_manager
         self._approval_store = approval_store
@@ -87,6 +89,7 @@ class ToolScheduler:
         self._summarize_fn = summarize_fn
         self._config = config or ToolSchedulerConfig()
         self._send_card = send_card
+        self._emitter = emitter
         self._records: dict[str, ToolCallRecord] = {}
 
     @property
@@ -103,8 +106,18 @@ class ToolScheduler:
         tool_name: str,
         raw_args: str,
         chat_id: str = "",
+        source: str = "ruyi",
+        content: str = "",
     ) -> ScheduleResult:
-        """单个工具调用的完整调度流程。"""
+        """单个工具调用的完整调度流程。
+
+        Parameters
+        ----------
+        source:
+            输出来源标识 — "ruyi" | "kairos"。
+        content:
+            LLM 伴随文本，仅同一批第一个工具携带。
+        """
 
         # ── 1. validating: 参数解析 & 工具查找 ──
         record = ToolCallRecord(call_id=call_id, tool_name=tool_name)
@@ -113,13 +126,13 @@ class ToolScheduler:
         try:
             args = json.loads(raw_args) if raw_args else {}
         except json.JSONDecodeError as e:
-            return self._set_error(record, f"参数解析失败: {e}")
+            return await self._set_error(record, f"参数解析失败: {e}", source)
 
         record.args = args
 
         tool = self._tool_manager.get_tool(tool_name)
         if tool is None:
-            return self._set_error(record, f"工具不存在: {tool_name}")
+            return await self._set_error(record, f"工具不存在: {tool_name}", source)
 
         # ── 2. validating: 调用工具的 check_permissions ──
         if tool.check_permissions is not None:
@@ -129,11 +142,11 @@ class ToolScheduler:
                 logger.error(
                     "Tool %s check_permissions error: %s", tool_name, e, exc_info=True,
                 )
-                return self._set_error(record, f"权限验证异常: {e}")
+                return await self._set_error(record, f"权限验证异常: {e}", source)
 
             if not perm_result.passed:
-                return self._set_error(
-                    record, perm_result.error or "权限验证未通过",
+                return await self._set_error(
+                    record, perm_result.error or "权限验证未通过", source,
                 )
             if perm_result.sanitized_args is not None:
                 args = perm_result.sanitized_args
@@ -161,23 +174,23 @@ class ToolScheduler:
 
             if outcome != "approve":
                 reason = "用户取消" if outcome == "cancel" else "审批超时"
-                return self._set_cancelled(record, reason)
+                return await self._set_cancelled(record, reason, source)
 
         # ── 4. scheduled -> executing ──
         record.status = ToolCallStatus.SCHEDULED
-        logger.info("Tool scheduled: %s (call=%s)", tool_name, call_id)
-
         record.status = ToolCallStatus.EXECUTING
         logger.info("Tool executing: %s (call=%s)", tool_name, call_id)
+
+        await self._emit_executing(record, args, source, content)
 
         try:
             tool_result = await self._tool_manager.execute(tool_name, args)
         except Exception as e:
             logger.error("Tool %s execution error: %s", tool_name, e, exc_info=True)
-            return self._set_error(record, str(e))
+            return await self._set_error(record, str(e), source)
 
         if not tool_result.success:
-            return self._set_error(record, tool_result.error or "工具执行失败")
+            return await self._set_error(record, tool_result.error or "工具执行失败", source)
 
         # ── 5. render_result: 格式化为大模型可读的字符串 ──
         result_str = self._tool_manager.render(tool_name, tool_result)
@@ -185,15 +198,18 @@ class ToolScheduler:
         # ── 6. OutputTruncator: 输出裁剪 ──
         result_str = await self._truncator.truncate(result_str, self._summarize_fn)
 
-        return self._set_success(record, result_str)
+        return await self._set_success(record, result_str, source)
 
     async def schedule_batch(
         self,
         tool_calls: list[dict[str, Any]],
         chat_id: str = "",
+        source: str = "ruyi",
+        assistant_content: str = "",
     ) -> list[ScheduleResult]:
         """批量调度 LLM 返回的 tool_calls。
 
+        assistant_content 仅附着在第一个工具的 ToolExecutingEvent.content 上。
         只读工具并行执行，否则串行。
         """
         if self._can_parallel(tool_calls):
@@ -203,18 +219,22 @@ class ToolScheduler:
                     tool_name=tc["function"]["name"],
                     raw_args=tc["function"]["arguments"],
                     chat_id=chat_id,
+                    source=source,
+                    content=assistant_content if i == 0 else "",
                 )
-                for tc in tool_calls
+                for i, tc in enumerate(tool_calls)
             ]
             return list(await asyncio.gather(*tasks))
 
         results: list[ScheduleResult] = []
-        for tc in tool_calls:
+        for i, tc in enumerate(tool_calls):
             r = await self.schedule(
                 call_id=tc["id"],
                 tool_name=tc["function"]["name"],
                 raw_args=tc["function"]["arguments"],
                 chat_id=chat_id,
+                source=source,
+                content=assistant_content if i == 0 else "",
             )
             results.append(r)
         return results
@@ -311,10 +331,67 @@ class ToolScheduler:
         return True
 
     # ------------------------------------------------------------------
+    # 输出事件
+    # ------------------------------------------------------------------
+
+    async def _emit_executing(
+        self, record: ToolCallRecord, args: dict[str, Any], source: str, content: str,
+    ) -> None:
+        if not self._emitter:
+            return
+        from core.output.types import ToolExecutingEvent
+
+        await self._emitter.emit(ToolExecutingEvent(
+            source=source,
+            call_id=record.call_id,
+            tool_name=record.tool_name,
+            args_summary=self._summarize_args(record.tool_name, args),
+            content=content,
+        ))
+
+    async def _emit_done(
+        self, record: ToolCallRecord, source: str,
+        success: bool, status_str: str,
+        result_preview: str = "", error: str | None = None,
+    ) -> None:
+        if not self._emitter:
+            return
+        from core.output.types import ToolDoneEvent
+
+        await self._emitter.emit(ToolDoneEvent(
+            source=source,
+            call_id=record.call_id,
+            tool_name=record.tool_name,
+            success=success,
+            status=status_str,
+            result_preview=result_preview,
+            error=error,
+            duration_ms=record.duration_ms or 0,
+        ))
+
+    @staticmethod
+    def _summarize_args(tool_name: str, args: dict[str, Any]) -> str:
+        """将工具参数转为简短可读的摘要字符串。"""
+        if not args:
+            return ""
+        parts: list[str] = []
+        for key, val in args.items():
+            s = str(val)
+            if len(s) > 60:
+                s = s[:57] + "..."
+            parts.append(f"{key}={s}")
+        summary = ", ".join(parts)
+        if len(summary) > 150:
+            summary = summary[:147] + "..."
+        return summary
+
+    # ------------------------------------------------------------------
     # 状态设置
     # ------------------------------------------------------------------
 
-    def _set_success(self, record: ToolCallRecord, result_string: str) -> ScheduleResult:
+    async def _set_success(
+        self, record: ToolCallRecord, result_string: str, source: str = "ruyi",
+    ) -> ScheduleResult:
         record.status = ToolCallStatus.SUCCESS
         record.result = result_string
         record.duration_ms = record.elapsed_ms()
@@ -322,6 +399,8 @@ class ToolScheduler:
             "Tool %s success (call=%s, %.0fms)",
             record.tool_name, record.call_id, record.duration_ms,
         )
+        preview = result_string[:500] if result_string else ""
+        await self._emit_done(record, source, True, "success", result_preview=preview)
         return ScheduleResult(
             call_id=record.call_id,
             tool_name=record.tool_name,
@@ -331,13 +410,16 @@ class ToolScheduler:
             result_string=result_string,
         )
 
-    def _set_error(self, record: ToolCallRecord, error: str) -> ScheduleResult:
+    async def _set_error(
+        self, record: ToolCallRecord, error: str, source: str = "ruyi",
+    ) -> ScheduleResult:
         record.status = ToolCallStatus.ERROR
         record.error = error
         record.duration_ms = record.elapsed_ms()
         logger.error(
             "Tool %s error (call=%s): %s", record.tool_name, record.call_id, error,
         )
+        await self._emit_done(record, source, False, "error", error=error)
         return ScheduleResult(
             call_id=record.call_id,
             tool_name=record.tool_name,
@@ -346,7 +428,9 @@ class ToolScheduler:
             error=error,
         )
 
-    def _set_cancelled(self, record: ToolCallRecord, reason: str) -> ScheduleResult:
+    async def _set_cancelled(
+        self, record: ToolCallRecord, reason: str, source: str = "ruyi",
+    ) -> ScheduleResult:
         record.status = ToolCallStatus.CANCELLED
         record.error = reason
         record.duration_ms = record.elapsed_ms()
@@ -354,6 +438,7 @@ class ToolScheduler:
             "Tool %s cancelled (call=%s): %s",
             record.tool_name, record.call_id, reason,
         )
+        await self._emit_done(record, source, False, "cancelled", error=reason)
         return ScheduleResult(
             call_id=record.call_id,
             tool_name=record.tool_name,

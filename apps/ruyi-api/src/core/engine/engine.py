@@ -52,6 +52,7 @@ class ExecutionEngine:
         tools: list[dict[str, Any]],
         chat_id: str = "",
         on_message: Callable[[dict[str, Any]], None] | None = None,
+        source: str = "ruyi",
     ) -> EngineResult:
         """执行 LLM-Tool 循环。
 
@@ -61,6 +62,8 @@ class ExecutionEngine:
             Optional callback invoked with each intermediate message
             (assistant tool_calls and tool responses) as soon as it is
             produced, enabling immediate persistence to disk.
+        source:
+            输出来源标识 — "ruyi" | "kairos"，传递给 ToolScheduler。
         """
         total_usage = TokenUsage()
         working_messages = list(messages)
@@ -86,7 +89,9 @@ class ExecutionEngine:
             for tc in response.tool_calls:
                 logger.info("Tool call [%d]: %s(%s)", iteration + 1, tc.name, tc.arguments[:100])
 
-            tool_msgs = await self._execute_tools(response, chat_id)
+            tool_msgs = await self._execute_tools(
+                response, chat_id, source=source,
+            )
             working_messages.extend(tool_msgs)
             for tm in tool_msgs:
                 if on_message:
@@ -129,6 +134,7 @@ class ExecutionEngine:
         self,
         response: LLMResponse,
         chat_id: str,
+        source: str = "ruyi",
     ) -> list[dict[str, Any]]:
         raw_tool_calls = [
             {
@@ -139,7 +145,12 @@ class ExecutionEngine:
             for tc in response.tool_calls
         ]
 
-        results = await self._scheduler.schedule_batch(raw_tool_calls, chat_id=chat_id)
+        results = await self._scheduler.schedule_batch(
+            raw_tool_calls,
+            chat_id=chat_id,
+            source=source,
+            assistant_content=response.content or "",
+        )
 
         tool_msgs: list[dict[str, Any]] = []
         for sr in results:

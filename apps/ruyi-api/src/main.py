@@ -36,10 +36,12 @@ from channels.registry import get_all_channels, register_channel
 from api.app import create_app
 from api.routes.chat import set_agent, set_message_queue
 from api.routes.card_callback import set_approval_store
-from api.routes.ws import install_ws_log_handler
+from api.routes.ws import install_ws_log_handler, get_log_file_tailer
 from core.queue.message_queue import MessageQueue
 from core.queue.processor import QueueProcessor
-from core.reply import ReplyDispatcher, FutureBackend, CliBackend, FeishuBackend
+from core.output import (
+    OutputEmitter, FutureBackend, LogBackend, WebSocketBackend, FeishuBackend,
+)
 from scheduler.cron_scheduler import CronTaskScheduler
 from core.agent.kairos_agent import KairosRunner
 
@@ -47,6 +49,7 @@ _memory_scheduler: MemoryUpdateScheduler | None = None
 _forge_plan_scheduler: ForgePlanScheduler | None = None
 _cron_scheduler: CronTaskScheduler | None = None
 _queue_processor_task: asyncio.Task | None = None
+_log_tailer = None
 
 
 async def startup() -> None:
@@ -111,6 +114,15 @@ async def startup() -> None:
     async def tool_summarize_fn(text: str) -> str:
         return await llm_low.simple_chat(text)
 
+    # 6.5. OutputEmitter (统一输出系统)
+    from api.routes.ws import manager as ws_manager
+
+    emitter = OutputEmitter()
+    emitter.add_backend(FutureBackend())
+    emitter.add_backend(LogBackend())
+    emitter.add_backend(WebSocketBackend(ws_manager))
+    logger.info("OutputEmitter created with FutureBackend + LogBackend + WebSocketBackend")
+
     scheduler_config = ToolSchedulerConfig(
         approval_mode=ApprovalMode.YOLO,
     )
@@ -119,6 +131,7 @@ async def startup() -> None:
         approval_store=approval_store,
         summarize_fn=tool_summarize_fn,
         config=scheduler_config,
+        emitter=emitter,
     )
     logger.info("ToolScheduler created (mode=%s)", scheduler_config.approval_mode.value)
 
@@ -132,15 +145,11 @@ async def startup() -> None:
     set_agent(agent)
     logger.info("Agent created")
 
-    # 7.5. Message queue + reply dispatcher + KAIROS + processor + cron scheduler
+    # 7.5. Message queue + KAIROS + processor + cron scheduler
     global _queue_processor_task
 
     queue = MessageQueue()
     set_message_queue(queue)
-
-    reply_dispatcher = ReplyDispatcher()
-    reply_dispatcher.add_backend(FutureBackend())
-    reply_dispatcher.add_backend(CliBackend())
 
     kairos_runner: KairosRunner | None = None
     if settings.kairos.enabled:
@@ -160,7 +169,7 @@ async def startup() -> None:
     processor = QueueProcessor(
         queue=queue,
         agent=agent,
-        reply_dispatcher=reply_dispatcher,
+        emitter=emitter,
         kairos_runner=kairos_runner,
         kairos_config=settings.kairos if settings.kairos.enabled else None,
     )
@@ -228,7 +237,7 @@ async def startup() -> None:
         )
         await channel.connect()
         register_channel(channel)
-        reply_dispatcher.add_backend(FeishuBackend(channel))
+        emitter.add_backend(FeishuBackend(channel))
         logger.info("FeishuChannel connected (p2p single-chat)")
 
         async def send_card(chat_id: str, card_json: str) -> None:
@@ -239,11 +248,16 @@ async def startup() -> None:
     else:
         logger.info("Channel mode = %s, skipping Feishu (API-only mode)", settings.channel_mode)
 
+    # 11. Log file tailer (tail tiangong + ruyi log files → WS)
+    global _log_tailer
+    _log_tailer = get_log_file_tailer()
+    _log_tailer.start()
+
     logger.info("=== HeartClaw ready ===")
 
 
 async def shutdown() -> None:
-    global _memory_scheduler, _forge_plan_scheduler, _cron_scheduler, _queue_processor_task
+    global _memory_scheduler, _forge_plan_scheduler, _cron_scheduler, _queue_processor_task, _log_tailer
     logger.info("=== HeartClaw shutting down ===")
 
     if _cron_scheduler:
@@ -262,6 +276,10 @@ async def shutdown() -> None:
 
     if _memory_scheduler:
         await _memory_scheduler.stop()
+
+    if _log_tailer:
+        await _log_tailer.stop()
+        _log_tailer = None
 
     channels = get_all_channels()
     for name, channel in channels.items():

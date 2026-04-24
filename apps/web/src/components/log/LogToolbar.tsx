@@ -1,6 +1,7 @@
-import { Search, CheckSquare, Pause } from 'lucide-react'
+import { Search, CheckSquare, Pause, Bug } from 'lucide-react'
 
-type LogLevel = 'ALL' | 'INFO' | 'WARN' | 'ERROR'
+export type LogLevel = 'ALL' | 'INFO' | 'WARN' | 'ERROR'
+export type LogSource = 'tiangong' | 'ruyi-debug'
 
 type Props = {
   activeLevel: LogLevel
@@ -9,6 +10,8 @@ type Props = {
   onSearchChange: (value: string) => void
   autoScroll: boolean
   onAutoScrollToggle: () => void
+  logSource: LogSource
+  onLogSourceChange: (source: LogSource) => void
 }
 
 const levels: LogLevel[] = ['ALL', 'INFO', 'WARN', 'ERROR']
@@ -20,11 +23,15 @@ export default function LogToolbar({
   onSearchChange,
   autoScroll,
   onAutoScrollToggle,
+  logSource,
+  onLogSourceChange,
 }: Props) {
+  const isDebug = logSource === 'ruyi-debug'
+
   return (
     <div className="log-toolbar">
       <div className="log-filter-tabs">
-        {levels.map((level) => (
+        {!isDebug && levels.map((level) => (
           <button
             key={level}
             className={`log-filter-tab${activeLevel === level ? ' active' : ''}`}
@@ -33,6 +40,15 @@ export default function LogToolbar({
             {level === 'ALL' ? '全部' : level}
           </button>
         ))}
+
+        <span className="log-filter-divider" />
+        <button
+          className={`log-filter-tab log-debug-btn${isDebug ? ' active' : ''}`}
+          onClick={() => onLogSourceChange(isDebug ? 'tiangong' : 'ruyi-debug')}
+        >
+          <Bug size={14} />
+          如意调试
+        </button>
       </div>
 
       <div className="log-search-wrapper">

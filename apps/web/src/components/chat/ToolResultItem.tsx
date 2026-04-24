@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, FileText, FilePen, TerminalSquare } from 'lucide-react'
+import { ChevronRight, FileText, FilePen, TerminalSquare, Loader2, AlertCircle, Ban } from 'lucide-react'
 import ToolResultBlock from './ToolResultBlock'
 
 export type ToolResult = {
@@ -7,6 +7,10 @@ export type ToolResult = {
   label: string
   items?: string[]
   preview?: string[]
+  call_id?: string
+  status?: 'executing' | 'success' | 'error' | 'cancelled'
+  error?: string
+  duration_ms?: number
 }
 
 const iconMap = {
@@ -21,10 +25,39 @@ type Props = {
 
 export default function ToolResultItem({ result }: Props) {
   const [expanded, setExpanded] = useState(false)
-  const Icon = iconMap[result.type]
+
+  if (result.status === 'executing') {
+    return (
+      <div className="tool-result-item tool-result-executing">
+        <Loader2 className="tool-spin" />
+        <span>{result.label}</span>
+      </div>
+    )
+  }
+
+  if (result.status === 'error') {
+    return (
+      <div className="tool-result-item tool-result-error">
+        <AlertCircle />
+        <span>{result.label}</span>
+        {result.error && <span className="tool-error-text">{result.error}</span>}
+      </div>
+    )
+  }
+
+  if (result.status === 'cancelled') {
+    return (
+      <div className="tool-result-item tool-result-cancelled">
+        <Ban />
+        <span>{result.label}</span>
+      </div>
+    )
+  }
+
+  const Icon = iconMap[result.type] || TerminalSquare
   const hasPreview = result.preview && result.preview.length > 0
 
-  if (result.type === 'read') {
+  if (result.type === 'read' && !hasPreview) {
     return (
       <div className="tool-result-item">
         <Icon />

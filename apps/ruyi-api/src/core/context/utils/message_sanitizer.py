@@ -63,6 +63,15 @@ def sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if message["tool_call_id"] not in assistant_call_owner_by_id:
                 removed_message_indices.add(message_index)
 
+    # Rule 3: remove assistant messages with empty content and no tool_calls
+    for message_index, message in enumerate(messages):
+        if (
+            message.get("role") == "assistant"
+            and not message.get("tool_calls")
+            and not (message.get("content") or "").strip()
+        ):
+            removed_message_indices.add(message_index)
+
     return [
         message
         for message_index, message in enumerate(messages)

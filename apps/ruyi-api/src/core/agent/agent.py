@@ -83,6 +83,7 @@ class Agent:
             llm, messages, tools,
             chat_id=chat_id,
             on_message=lambda msg: self._ctx.append_message(msg),
+            source="ruyi",
         )
 
         self._token_counter.add(result.usage.prompt_tokens, result.usage.completion_tokens)

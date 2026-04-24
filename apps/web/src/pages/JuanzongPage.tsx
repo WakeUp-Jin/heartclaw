@@ -11,6 +11,7 @@ export default function JuanzongPage() {
   const [tree, setTree] = useState<TreeNode | null>(null)
   const [treeLoading, setTreeLoading] = useState(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [originalContent, setOriginalContent] = useState('')
   const [content, setContent] = useState('')
   const [saving, setSaving] = useState(false)
@@ -38,6 +39,7 @@ export default function JuanzongPage() {
 
   async function loadFile(path: string) {
     try {
+      setLoadError(null)
       const resp = await fetch(`${apiBaseUrl}/api/juanzong/file?path=${encodeURIComponent(path)}`)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = (await resp.json()) as { content: string }
@@ -45,8 +47,10 @@ export default function JuanzongPage() {
       setContent(data.content)
       setSelectedPath(path)
     } catch {
+      setSelectedPath(null)
       setOriginalContent('')
       setContent('')
+      setLoadError(`无法读取文件：${path}`)
     }
   }
 
@@ -129,6 +133,7 @@ export default function JuanzongPage() {
                     className="editor-tab-close"
                     onClick={() => {
                       setSelectedPath(null)
+                      setLoadError(null)
                       setContent('')
                       setOriginalContent('')
                     }}
@@ -152,7 +157,7 @@ export default function JuanzongPage() {
             </>
           ) : (
             <div className="editor-placeholder">
-              选择一个文件开始编辑
+              {loadError ?? '选择一个文件开始编辑'}
             </div>
           )}
         </div>
