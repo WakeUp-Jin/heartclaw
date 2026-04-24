@@ -1,7 +1,7 @@
 """交互式 CLI — 用于本地测试 Agent 的对话循环。
 
 用法:
-    cd src && python -m core.agent.cli
+    cd apps/ruyi-api && PYTHONPATH=src uv run python -m core.agent.cli
 """
 
 from __future__ import annotations

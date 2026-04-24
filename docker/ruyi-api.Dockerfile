@@ -11,13 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install uv
 
 # Copy dependency file first for better caching
-COPY pyproject.toml uv.lock ./
+COPY apps/ruyi-api/pyproject.toml apps/ruyi-api/uv.lock ./
 
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
 # Copy application code
-COPY . .
+COPY apps/ruyi-api/src/ /app/src/
 
 # Create data directory
 RUN mkdir -p /app/data

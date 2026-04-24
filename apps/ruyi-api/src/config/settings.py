@@ -12,7 +12,16 @@ if TYPE_CHECKING:
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)}")
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+def _find_project_root() -> Path:
+    """Find the repository root that owns project-level config files."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "config.json").is_file() or (parent / ".env").is_file():
+            return parent
+    return current.parent.parent.parent
+
+
+_PROJECT_ROOT = _find_project_root()
 _DEFAULT_ENV_PATH = _PROJECT_ROOT / ".env"
 
 
@@ -270,6 +279,10 @@ class TianGongConfig:
     workspace_dir: str = "/workspace"
     api_key: str = ""
     forge_plan_schedule: str = "23:00"
+    max_forge_seconds: int = 3600
+    enable_forge_timeout: bool = True
+    cancel_check_interval_seconds: int = 10
+    agent_log_tail_lines: int = 80
 
 
 @dataclass

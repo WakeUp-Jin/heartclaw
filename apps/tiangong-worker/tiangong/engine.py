@@ -8,14 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import platform
 import re
 import shutil
 import subprocess
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from tiangong.adapters import CodingAgentAdapter, AgentResult
 
@@ -49,10 +51,20 @@ class TianGongEngine:
         self.shared_dir = Path(config["shared_dir"])
         self.workspace = Path(config["workspace_dir"])
         self.poll_interval: int = config.get("poll_interval", 900)
+        self.max_forge_seconds: int = config.get("max_forge_seconds", 3600)
+        self.enable_forge_timeout: bool = config.get("enable_forge_timeout", True)
+        self.cancel_check_interval_seconds: int = config.get(
+            "cancel_check_interval_seconds", 10
+        )
+        self.agent_log_tail_lines: int = config.get("agent_log_tail_lines", 80)
 
         self.orders_dir = self.shared_dir / "tiangong" / "orders"
         self.forge_spec_path = self.shared_dir / "tiangong" / "forge-spec.md"
         self.forge_logs_dir = self.shared_dir / "tiangong" / "forge-logs"
+        self.runtime_dir = self.shared_dir / "tiangong" / "runtime"
+        self.cancel_requests_dir = self.runtime_dir / "cancel_requests"
+        self.agent_logs_dir = self.runtime_dir / "logs"
+        self.active_task_path = self.runtime_dir / "active_task.json"
 
         self.agent = CodingAgentAdapter.create(config["agent"])
 
@@ -125,7 +137,12 @@ class TianGongEngine:
         self.agent.cwd = str(tool_workspace)
         try:
             result = await self._dispatch_agent(
-                order_content, forge_type, rollout_path,
+                order_content,
+                forge_type,
+                rollout_path,
+                proc_file=proc_file,
+                tool_name=tool_name,
+                tool_workspace=tool_workspace,
             )
         finally:
             self.agent.cwd = original_cwd
@@ -151,6 +168,9 @@ class TianGongEngine:
         order_content: str,
         forge_type: str,
         rollout_path: Optional[str],
+        proc_file: Path,
+        tool_name: str,
+        tool_workspace: Path,
     ) -> AgentResult:
         """根据锻造类型选择首次执行或恢复会话执行。"""
         forge_spec = ""
@@ -166,14 +186,106 @@ class TianGongEngine:
             f"{order_content}"
         )
 
+        return await self._run_agent_with_runtime_watch(
+            prompt=prompt,
+            forge_type=forge_type,
+            rollout_path=rollout_path,
+            proc_file=proc_file,
+            tool_name=tool_name,
+            tool_workspace=tool_workspace,
+        )
+
+    async def _run_agent_with_runtime_watch(
+        self,
+        prompt: str,
+        forge_type: str,
+        rollout_path: Optional[str],
+        proc_file: Path,
+        tool_name: str,
+        tool_workspace: Path,
+    ) -> AgentResult:
+        """运行 Agent，并同时处理天工硬超时和 KAIROS 取消请求。"""
+        order_id = proc_file.stem
+        agent_log_path = self.agent_logs_dir / f"{order_id}.log"
+        started_at = self._now_iso()
+        runtime_state: dict[str, Any] = {
+            "order_id": order_id,
+            "order_file": str(proc_file),
+            "tool_name": tool_name,
+            "forge_type": forge_type,
+            "agent_type": self.agent.agent_type,
+            "tool_workspace": str(tool_workspace),
+            "started_at": started_at,
+            "last_heartbeat_at": started_at,
+            "last_output_at": None,
+            "agent_log_path": str(agent_log_path),
+            "status": "running",
+        }
+        agent_log_path.parent.mkdir(parents=True, exist_ok=True)
+        agent_log_path.touch(exist_ok=True)
+        self._write_active_task(runtime_state)
+
+        original_log_path = self.agent.output_log_path
+        original_on_output = self.agent.on_output
+        self.agent.output_log_path = agent_log_path
+        self.agent.on_output = (
+            lambda _stream, _text: self._update_active_task_output(runtime_state)
+        )
+
         is_reforge = forge_type.startswith("重锻")
         if is_reforge and rollout_path:
-            logger.info(
-                "Reforge mode: resuming from rollout %s", rollout_path
+            logger.info("Reforge mode: resuming from rollout %s", rollout_path)
+            agent_task = asyncio.create_task(
+                self.agent.run_with_rollout(prompt, rollout_path)
             )
-            return await self.agent.run_with_rollout(prompt, rollout_path)
+        else:
+            agent_task = asyncio.create_task(self.agent.run(prompt))
 
-        return await self.agent.run(prompt)
+        started_monotonic = time.monotonic()
+        cancel_reason: str | None = None
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {agent_task},
+                    timeout=self.cancel_check_interval_seconds,
+                )
+                if done:
+                    return agent_task.result()
+
+                runtime_state["last_heartbeat_at"] = self._now_iso()
+                self._write_active_task(runtime_state)
+
+                elapsed = time.monotonic() - started_monotonic
+                if self.enable_forge_timeout and elapsed >= self.max_forge_seconds:
+                    cancel_reason = (
+                        f"任务执行超过 {self.max_forge_seconds} 秒，天工主动取消"
+                    )
+                    logger.warning(cancel_reason)
+                    break
+
+                cancel_request = self._read_cancel_request(order_id)
+                if cancel_request is not None:
+                    reason = str(cancel_request.get("reason") or "未提供原因")
+                    cancel_reason = f"KAIROS 判断任务已无效并请求取消：{reason}"
+                    logger.warning("%s evidence=%s", cancel_reason, cancel_request.get("evidence"))
+                    break
+
+            await self.agent.cancel_current_run(cancel_reason)
+            try:
+                await agent_task
+            except Exception:
+                logger.debug("Agent task ended after cancellation", exc_info=True)
+            return AgentResult(success=False, error=cancel_reason)
+        finally:
+            if not agent_task.done():
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except asyncio.CancelledError:
+                    pass
+            self.agent.output_log_path = original_log_path
+            self.agent.on_output = original_on_output
+            self._clear_active_task(order_id)
 
     # ------------------------------------------------------------------
     # 锻造令解析
@@ -327,6 +439,63 @@ class TianGongEngine:
         for sub in ("pending", "processing", "done"):
             (self.orders_dir / sub).mkdir(parents=True, exist_ok=True)
         self.forge_logs_dir.mkdir(parents=True, exist_ok=True)
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.cancel_requests_dir.mkdir(parents=True, exist_ok=True)
+        self.agent_logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # 运行时状态与取消请求
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+    def _write_active_task(self, state: dict[str, Any]) -> None:
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.active_task_path.with_suffix(".json.tmp")
+        tmp_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(self.active_task_path)
+
+    def _update_active_task_output(self, state: dict[str, Any]) -> None:
+        state["last_output_at"] = self._now_iso()
+        state["last_heartbeat_at"] = state["last_output_at"]
+        self._write_active_task(state)
+
+    def _clear_active_task(self, order_id: str) -> None:
+        try:
+            if self.active_task_path.is_file():
+                data = json.loads(self.active_task_path.read_text(encoding="utf-8"))
+                if data.get("order_id") == order_id:
+                    self.active_task_path.unlink()
+            cancel_path = self.cancel_requests_dir / f"{order_id}.json"
+            if cancel_path.is_file():
+                cancel_path.unlink()
+        except Exception:
+            logger.warning("Failed to clear active task state", exc_info=True)
+
+    def _read_cancel_request(self, order_id: str) -> dict[str, Any] | None:
+        request_path = self.cancel_requests_dir / f"{order_id}.json"
+        if not request_path.is_file():
+            return None
+        try:
+            raw = json.loads(request_path.read_text(encoding="utf-8"))
+            if raw.get("order_id") not in (None, order_id):
+                logger.warning(
+                    "Ignoring cancel request with mismatched order_id: %s",
+                    request_path,
+                )
+                return None
+            return raw
+        except json.JSONDecodeError:
+            logger.warning("Invalid cancel request JSON: %s", request_path)
+            return {
+                "order_id": order_id,
+                "reason": f"取消请求文件 JSON 格式错误：{request_path}",
+            }
 
     def _build_runtime_env_prompt(self) -> str:
         """构建注入到 Prompt 的天工执行环境说明。"""

@@ -1,9 +1,9 @@
 services:
-  heartclaw:
+  ruyi-api:
     build:
       context: .
-      dockerfile: docker/heartclaw.Dockerfile
-    container_name: heartclaw
+      dockerfile: docker/ruyi-api.Dockerfile
+    container_name: ruyi-api
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -15,11 +15,11 @@ services:
     volumes:
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}:/root/.heartclaw
 
-  tiangong:
+  tiangong-worker:
     build:
       context: .
-      dockerfile: docker/tiangong.Dockerfile
-    container_name: tiangong
+      dockerfile: docker/tiangong-worker.Dockerfile
+    container_name: tiangong-worker
     restart: unless-stopped
     env_file:
       - .env
@@ -31,3 +31,17 @@ services:
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/opencode:/root/.local/share/opencode
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/opencode-config:/root/.config/opencode
       - ${HEARTCLAW_HOME:-${HOME}/.heartclaw}/tiangong/workspace:/workspace
+
+  web:
+    build:
+      context: apps/web
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    container_name: heartclaw-web
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - ruyi-api

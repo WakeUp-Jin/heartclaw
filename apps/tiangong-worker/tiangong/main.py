@@ -56,6 +56,10 @@ def load_config(shared_dir: str | None = None) -> dict:
             "shared_dir": str(shared),
             "workspace_dir": "/workspace",
             "poll_interval": 900,
+            "max_forge_seconds": 3600,
+            "enable_forge_timeout": True,
+            "cancel_check_interval_seconds": 10,
+            "agent_log_tail_lines": 80,
             "agent": {"type": "codex", "workspace_dir": "/workspace"},
         }
 
@@ -69,6 +73,12 @@ def load_config(shared_dir: str | None = None) -> dict:
         "shared_dir": str(shared),
         "workspace_dir": tiangong_cfg.get("workspace_dir", "/workspace"),
         "poll_interval": tiangong_cfg.get("poll_interval", 900),
+        "max_forge_seconds": tiangong_cfg.get("max_forge_seconds", 3600),
+        "enable_forge_timeout": tiangong_cfg.get("enable_forge_timeout", True),
+        "cancel_check_interval_seconds": tiangong_cfg.get(
+            "cancel_check_interval_seconds", 10
+        ),
+        "agent_log_tail_lines": tiangong_cfg.get("agent_log_tail_lines", 80),
         "agent": {
             "type": tiangong_cfg.get("agent_type", "codex"),
             "workspace_dir": tiangong_cfg.get("workspace_dir", "/workspace"),

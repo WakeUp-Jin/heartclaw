@@ -1,8 +1,8 @@
-.PHONY: up down logs chat ps bootstrap cli dev
+.PHONY: up down logs chat ps bootstrap cli dev web-dev web-build
 
 bootstrap:
 	mkdir -p ~/.heartclaw
-	cd src && python -c "from config.settings import ensure_heartclaw_dirs; ensure_heartclaw_dirs()"
+	cd apps/ruyi-api && PYTHONPATH=src uv run python -c "from config.settings import ensure_heartclaw_dirs; ensure_heartclaw_dirs()"
 
 up:
 	mkdir -p $${HOME}/.heartclaw/tiangong/codex
@@ -26,7 +26,13 @@ ps:
 	docker compose ps
 
 cli:
-	cd src && python -m core.agent.cli
+	cd apps/ruyi-api && PYTHONPATH=src uv run python -m core.agent.cli
 
 dev:
-	uvicorn src.api.app:app --reload
+	cd apps/ruyi-api && PYTHONPATH=src uv run python src/main.py
+
+web-dev:
+	cd apps/web && npm run dev
+
+web-build:
+	cd apps/web && npm run build

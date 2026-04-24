@@ -1,5 +1,5 @@
 {
-  "include": ["src"],
+  "include": ["apps/ruyi-api/src", "apps/tiangong-worker"],
   "typeCheckingMode": "basic",
   "reportMissingTypeStubs": "none",
   "reportUnknownVariableType": "none",
@@ -8,8 +8,12 @@
   "reportUnknownParameterType": "none",
   "executionEnvironments": [
     {
-      "root": "src",
-      "extraPaths": ["src"]
+      "root": "apps/ruyi-api/src",
+      "extraPaths": ["apps/ruyi-api/src"]
+    },
+    {
+      "root": "apps/tiangong-worker",
+      "extraPaths": ["apps/tiangong-worker"]
     }
   ]
 }

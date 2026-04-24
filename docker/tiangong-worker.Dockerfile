@@ -69,7 +69,7 @@ WORKDIR /app
 
 # 天工调度器零第三方依赖，只用 Python 标准库
 
-COPY tiangong/ /app/tiangong/
+COPY apps/tiangong-worker/tiangong/ /app/tiangong/
 
 # ── 共享卷挂载点 ─────────────────────────────────
 VOLUME ["/shared"]

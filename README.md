@@ -4,7 +4,7 @@
 
 ## 它能做什么
 
-- **智能对话**：在飞书单聊中与 Agent 对话，支持多轮上下文
+- **智能对话**：在飞书单聊或 Web 控制台中与 Agent 对话，支持多轮上下文
 - **执行命令**：通过 Bash 工具在服务器上运行 shell 命令
 - **文件操作**：读取文件内容、列出目录结构
 - **记忆系统**：短期记忆（会话历史）+ 长期记忆（偏好/知识），每日自动整理更新
@@ -13,28 +13,32 @@
 
 ## 架构
 
-```
-用户 ←→ 飞书机器人（单聊 p2p）←→ HeartClaw Agent
-                                     │
-                           ┌─────────┼─────────┐
-                           │         │         │
-                       Context    Engine     Tool
-                       上下文模块   执行引擎   工具模块
-                       │                     │
-                       ├─ 系统提示词          ├─ Bash（shell 命令）
-                       ├─ Skill 目录          ├─ ReadFile（读文件）
-                       ├─ 长期记忆            ├─ ListFiles（列目录）
-                       ├─ 短期记忆            ├─ TianGongEvolve（锻造令）
-                       └─ 上下文压缩          └─ Memory（读写记忆）
+```text
+用户 ←→ 飞书机器人 / Web 控制台 ←→ 如意 API（ruyi-api）
+                                      │
+                            ┌─────────┼─────────┐
+                            │         │         │
+                        Context    Engine     Tool
+                        上下文模块   执行引擎   工具模块
+                        │                     │
+                        ├─ 系统提示词          ├─ Bash（shell 命令）
+                        ├─ Skill 目录          ├─ ReadFile（读文件）
+                        ├─ 长期记忆            ├─ ListFiles（列目录）
+                        ├─ 短期记忆            ├─ TianGongEvolve（锻造令）
+                        └─ 上下文压缩          └─ Memory（读写记忆）
 
+ 如意 API 写入共享目录：
+ ~/.heartclaw/tiangong/orders/pending/*.md
+                                      │
+                                      ▼
  ┌──────────────────────────────────────────┐
- │  天工容器（独立运行）                       │
+ │  天工 Worker（tiangong-worker）            │
  │  巡查锻造令 → 调度 Coding Agent → 交付工具  │
- │  Rust 工具链 + Node.js + Codex CLI        │
+ │  Rust 工具链 + Node.js + Codex/Kimi/OpenCode │
  └──────────────────────────────────────────┘
 ```
 
-双容器架构：**heartclaw**（Agent 主服务）+ **tiangong**（天工锻造引擎），通过共享卷 `~/.heartclaw/` 通信。
+项目采用单仓库 monorepo：**ruyi-api**（Agent 主服务）+ **tiangong-worker**（天工锻造引擎）+ **web**（React + Vite 控制台）。如意和天工通过共享卷 `~/.heartclaw/` 文件通信，不引入额外消息队列。
 
 ## 快速开始
 
@@ -42,13 +46,15 @@
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) 包管理器
-- 飞书开放平台企业自建应用（需开启机器人能力）
+- Node.js 22+（仅 Web 开发需要）
+- 飞书开放平台企业自建应用（飞书模式需要）
 
-### 1. 克隆并安装依赖
+### 1. 克隆并安装后端依赖
 
 ```bash
 git clone <repo-url> heartclaw
 cd heartclaw
+cd apps/ruyi-api
 uv sync
 ```
 
@@ -60,7 +66,7 @@ make bootstrap
 
 这会在 `~/.heartclaw/` 下创建配置文件和数据目录：
 
-```
+```text
 ~/.heartclaw/
 ├── config.json                  # 主配置文件（模型、记忆、飞书、天工）
 ├── skills/
@@ -97,38 +103,34 @@ KIMI_API_KEY=sk-xxxxxxxx
 VOLCENGINE_API_KEY=xxxxxxxx
 ```
 
-### 4. 配置模型
-
-编辑 `~/.heartclaw/config.json`，项目提供了合理的默认值：
-
-| 模型层级 | 用途 | 默认模型 |
-|---------|------|---------|
-| high | 主对话 + 工具调用 | Kimi K2.5 |
-| medium | 备用 | Kimi K2.5 |
-| low | 上下文压缩 / 记忆整理 | Doubao Seed 2.0 Lite |
-
-### 5. 配置飞书开放平台
-
-1. 在 [飞书开放平台](https://open.feishu.cn/) 创建企业自建应用
-2. 开启 **机器人** 能力
-3. 配置事件订阅 → 添加事件 `im.message.receive_v1`，选择 **长连接** 模式
-4. 申请权限：`im:message`、`im:message:send_as_bot`
-5. 发布应用并通过管理员审核
-
-### 6. 启动
+### 4. 启动如意 API
 
 ```bash
-# 飞书模式（连接飞书长连接 + API 服务）
-HEARTCLAW_CHANNEL_MODE=feishu python src/main.py
-
 # API-only 模式（不连接飞书，仅暴露 HTTP 接口）
-python src/main.py
+cd apps/ruyi-api
+PYTHONPATH=src uv run python src/main.py
+
+# 飞书模式（连接飞书长连接 + API 服务）
+cd apps/ruyi-api
+HEARTCLAW_CHANNEL_MODE=feishu PYTHONPATH=src uv run python src/main.py
 
 # CLI 模式（本地终端对话，用于调试）
 make cli
+```
 
-# 开发模式（热重载）
-make dev
+### 5. 启动 Web 控制台
+
+```bash
+cd apps/web
+cp .env.example .env
+npm install
+npm run dev
+```
+
+默认 Web 会调用 `http://localhost:8000`。如需调整后端地址，修改 `apps/web/.env`：
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ### Docker 部署
@@ -137,69 +139,55 @@ make dev
 cp .env.example .env
 # 编辑 .env 填入配置
 
-make up        # 构建并启动双容器（heartclaw + tiangong）
+make up        # 构建并启动 ruyi-api + tiangong-worker + web
 make logs      # 查看日志
 make ps        # 查看容器状态
 make down      # 停止
 ```
 
-`docker compose` 会启动两个容器：
+`docker compose` 会启动三个容器：
 
 | 容器 | 作用 | 端口 |
 |------|------|------|
-| heartclaw | Agent 主服务（FastAPI + 飞书长连接） | 8000 |
-| tiangong | 天工锻造引擎（巡查锻造令 → Codex Agent → Rust 工具） | - |
+| ruyi-api | Agent 主服务（FastAPI + 飞书长连接） | 8000 |
+| tiangong-worker | 天工锻造引擎（巡查锻造令 → Coding Agent → Rust 工具） | - |
+| heartclaw-web | React + Vite 控制台 | 5173 |
 
-两个容器通过共享卷 `~/.heartclaw/` 通信——heartclaw 写入锻造令，tiangong 巡查并执行。
+如意和天工通过共享卷 `~/.heartclaw/` 通信：如意写入锻造令，天工巡查并执行。
 
 ## 项目结构
 
-```
+```text
 heartclaw/
-├── src/
-│   ├── main.py                          # 入口：组装模块，启动服务
-│   ├── config/settings.py               # 配置（config.json + .env 加载）
+├── apps/
+│   ├── ruyi-api/
+│   │   ├── pyproject.toml              # 如意 API Python 依赖
+│   │   ├── uv.lock
+│   │   └── src/
+│   │       ├── main.py                  # 如意入口：组装模块，启动服务
+│   │       ├── config/settings.py       # 配置（config.json + .env 加载）
+│   │       ├── core/                    # Agent / Engine / Tool / LLM / Context
+│   │       ├── channels/feishu/         # 飞书 Channel（WebSocket 长连接）
+│   │       ├── storage/                 # 存储层
+│   │       ├── scheduler/               # 定时任务
+│   │       ├── api/                     # FastAPI 路由
+│   │       └── utils/                   # 日志 / token 计数
 │   │
-│   ├── core/
-│   │   ├── agent/
-│   │   │   ├── agent.py                 # Agent 编排（接收消息 → 上下文 → 引擎 → 回复）
-│   │   │   ├── cli.py                   # CLI 交互模式
-│   │   │   └── memory_update_agent.py   # 记忆整理 Agent
-│   │   ├── engine/engine.py             # 执行引擎（LLM 调用 + 工具循环）
-│   │   ├── llm/
-│   │   │   ├── registry.py              # LLM 服务注册中心（high/medium/low）
-│   │   │   ├── factory.py               # LLM 服务工厂
-│   │   │   └── services/               # 各厂商适配（OpenAI/Kimi/Volcengine）
-│   │   ├── context/
-│   │   │   ├── manager.py               # 上下文管理器
-│   │   │   ├── modules/                # 系统提示 / 短期记忆 / 长期记忆
-│   │   │   └── utils/                  # 压缩器 / token 估算 / 消息清理
-│   │   ├── tool/
-│   │   │   ├── manager.py               # 工具注册与执行
-│   │   │   ├── scheduler.py             # 工具调度（审批模式）
-│   │   │   ├── memory_tools.py          # 记忆读写工具
-│   │   │   └── tools/                  # 内置工具（bash/read_file/list_files/tiangong_evolve）
-│   │   └── skill/
-│   │       └── scanner.py               # Skill 目录扫描与 catalog 构建
+│   ├── tiangong-worker/
+│   │   └── tiangong/
+│   │       ├── main.py                  # 天工入口
+│   │       ├── engine.py                # 巡查 + 调度 Coding Agent
+│   │       └── adapters.py              # Coding Agent 适配器
 │   │
-│   ├── channels/feishu/                 # 飞书 Channel（WebSocket 长连接）
-│   ├── storage/                         # 存储层（短期记忆/长期记忆/会话/配置）
-│   ├── scheduler/                       # 定时任务（每日记忆整理）
-│   ├── api/                             # FastAPI 路由（健康检查/对话/Webhook/卡片回调）
-│   ├── tiangong/                        # 天工引擎（独立容器中运行）
-│   │   ├── main.py                      # 天工入口
-│   │   ├── engine.py                    # 巡查 + 调度 Coding Agent
-│   │   └── adapters.py                  # Coding Agent 适配器（Codex）
-│   └── utils/                           # 日志 / token 计数
+│   └── web/                             # React + Vite 控制台
 │
 ├── docker/
-│   ├── heartclaw.Dockerfile             # Agent 主服务镜像
-│   ├── tiangong.Dockerfile              # 天工镜像（Rust + Node.js + Codex）
+│   ├── ruyi-api.Dockerfile              # 如意 API 镜像
+│   ├── tiangong-worker.Dockerfile       # 天工 Worker 镜像
 │   └── env/                             # 容器专用环境变量
 ├── docker-compose.yml
 ├── Makefile
 ├── config.json                          # 项目级配置模板
-├── pyproject.toml                       # Python 依赖管理
 └── .env.example                         # 环境变量模板
 ```
 
@@ -207,15 +195,16 @@ heartclaw/
 
 | 组件 | 选型 |
 |------|------|
-| 语言 | Python 3.12+ |
-| 包管理 | uv |
+| 后端语言 | Python 3.12+ |
+| 后端包管理 | uv |
 | API 框架 | FastAPI + uvicorn |
+| 前端 | React + Vite + TypeScript |
 | 飞书 SDK | lark-oapi |
 | LLM | OpenAI 兼容接口（Kimi / Doubao / DeepSeek / ...） |
 | 定时任务 | APScheduler |
 | 本地存储 | aiosqlite + JSONL 文件 |
-| 容器化 | Docker Compose（双容器） |
-| 天工工具链 | Rust + Codex CLI |
+| 容器化 | Docker Compose |
+| 天工工具链 | Rust + Codex/Kimi/OpenCode CLI |
 
 ## 设计文档
 

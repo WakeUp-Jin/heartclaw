@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from config.settings import KairosConfig
+from config.settings import settings
 from core.context.types import ContextItem, SystemPart
 from core.context.utils.message_sanitizer import sanitize_messages
 from core.engine import ExecutionEngine
@@ -124,11 +125,18 @@ class KairosRunner:
     def _build_context(self, tick_content: str) -> list[dict[str, Any]]:
         """组装 KAIROS tick 的精简上下文。"""
         from config.settings import get_heartclaw_home
-        review_dir = get_heartclaw_home() / "tiangong" / "orders" / "review"
+        home = get_heartclaw_home()
+        tiangong_dir = home / "tiangong"
+        review_dir = tiangong_dir / "orders" / "review"
         kairos_prompt = KAIROS_SYSTEM_PROMPT_TEMPLATE.format(
             short_term_dir=self._short_term_dir,
             long_term_dir=self._long_term_dir,
             review_dir=review_dir,
+            pending_dir=tiangong_dir / "orders" / "pending",
+            runtime_dir=tiangong_dir / "runtime",
+            active_task_path=tiangong_dir / "runtime" / "active_task.json",
+            cancel_requests_dir=tiangong_dir / "runtime" / "cancel_requests",
+            agent_log_tail_lines=settings.tiangong.agent_log_tail_lines,
         )
         system_parts = [kairos_prompt]
 

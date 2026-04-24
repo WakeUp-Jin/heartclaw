@@ -15,10 +15,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import shutil
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -42,6 +45,9 @@ class CodingAgentAdapter(ABC):
     def __init__(self, config: dict) -> None:
         self.cwd: str = config["workspace_dir"]
         self.agent_type: str = config["type"]
+        self._current_proc: asyncio.subprocess.Process | None = None
+        self.output_log_path: Path | None = None
+        self.on_output: Callable[[str, str], None] | None = None
 
     @abstractmethod
     async def run(self, prompt: str) -> AgentResult:
@@ -112,6 +118,7 @@ class CodingAgentAdapter(ABC):
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         except FileNotFoundError:
             error = (
@@ -121,18 +128,22 @@ class CodingAgentAdapter(ABC):
             logger.error("%s (cwd=%s)", error, cwd)
             return 127, "", error
 
+        self._current_proc = proc
         stdout_task = asyncio.create_task(
             self._read_stream(proc.stdout, "stdout", logger.info)
         )
         stderr_task = asyncio.create_task(
             self._read_stream(proc.stderr, "stderr", logger.warning)
         )
-        await proc.wait()
-        stdout = await stdout_task
-        stderr = await stderr_task
-        code = proc.returncode or 0
-        logger.info("Process exited with code %d", code)
-        return code, stdout, stderr
+        try:
+            await proc.wait()
+            stdout = await stdout_task
+            stderr = await stderr_task
+            code = proc.returncode or 0
+            logger.info("Process exited with code %d", code)
+            return code, stdout, stderr
+        finally:
+            self._current_proc = None
 
     async def _read_stream(
         self,
@@ -153,8 +164,64 @@ class CodingAgentAdapter(ABC):
             text = line.decode(errors="replace").rstrip()
             if text:
                 log_fn("[%s][%s] %s", self.agent_type, stream_name, text)
+                self._append_output_log(stream_name, text)
+                if self.on_output is not None:
+                    self.on_output(stream_name, text)
 
         return b"".join(chunks).decode(errors="replace")
+
+    async def cancel_current_run(self, reason: str) -> bool:
+        """取消当前正在运行的 Agent 子进程。"""
+        proc = self._current_proc
+        if proc is None or proc.returncode is not None:
+            logger.info("No running agent process to cancel: %s", reason)
+            return False
+
+        logger.warning(
+            "Cancelling agent process pid=%s agent=%s reason=%s",
+            proc.pid,
+            self.agent_type,
+            reason,
+        )
+        self._terminate_process(proc)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Agent process did not exit after terminate; killing pid=%s", proc.pid)
+            self._kill_process(proc)
+            await proc.wait()
+            return True
+
+    def _append_output_log(self, stream_name: str, text: str) -> None:
+        if self.output_log_path is None:
+            return
+
+        try:
+            self.output_log_path.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+            with open(self.output_log_path, "a", encoding="utf-8") as f:
+                f.write(f"{timestamp} [{stream_name}] {text}\n")
+        except OSError:
+            logger.warning(
+                "Failed to append agent output log: %s",
+                self.output_log_path,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _terminate_process(proc: asyncio.subprocess.Process) -> None:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except Exception:
+            proc.terminate()
+
+    @staticmethod
+    def _kill_process(proc: asyncio.subprocess.Process) -> None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            proc.kill()
 
 
 class ClaudeCodeAdapter(CodingAgentAdapter):
